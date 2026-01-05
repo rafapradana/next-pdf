@@ -113,6 +113,7 @@ func (s *SummaryService) GetByFileID(ctx context.Context, userID, fileID uuid.UU
 		ProcessingStartedAt:   summary.ProcessingStartedAt,
 		ProcessingCompletedAt: summary.ProcessingCompletedAt,
 		ProcessingDurationMs:  summary.ProcessingDurationMs,
+		Language:              summary.Language,
 		Version:               summary.Version,
 		IsCurrent:             summary.IsCurrent,
 		CreatedAt:             summary.CreatedAt,
@@ -149,19 +150,14 @@ func (s *SummaryService) Generate(ctx context.Context, userID, fileID uuid.UUID,
 		return nil, repository.ErrFileNotFound
 	}
 
-	// Check if already processing
-	if file.Status == models.StatusProcessing || file.Status == models.StatusPending {
-		return nil, ErrAlreadyProcessing
-	}
+	// Check checks removed to allow multiple/concurrent summaries and recovery from stuck state
+	// if file.Status == models.StatusProcessing || file.Status == models.StatusPending {
+	// 	return nil, ErrAlreadyProcessing
+	// }
 
-	// Check for existing pending job
-	existingJob, err := s.jobRepo.GetPendingByFileID(ctx, fileID)
-	if err != nil {
-		return nil, err
-	}
-	if existingJob != nil {
-		return nil, ErrAlreadyProcessing
-	}
+	// if existingJob != nil {
+	// 	return nil, ErrAlreadyProcessing
+	// }
 
 	// Update file status to pending
 	if err := s.fileRepo.UpdateStatus(ctx, fileID, models.StatusPending, nil); err != nil {
@@ -187,7 +183,7 @@ func (s *SummaryService) Generate(ctx context.Context, userID, fileID uuid.UUID,
 	// Call AI service asynchronously
 	go func() {
 		if s.aiClient != nil {
-			_ = s.aiClient.RequestSummary(context.Background(), fileID, file.StoragePath, req.Style, req.CustomInstructions)
+			_ = s.aiClient.RequestSummary(context.Background(), fileID, file.StoragePath, req.Style, req.CustomInstructions, req.Language)
 		}
 	}()
 
@@ -224,6 +220,7 @@ func (s *SummaryService) ProcessCallback(ctx context.Context, fileID uuid.UUID, 
 		PromptTokens:         &promptTokens,
 		CompletionTokens:     &completionTokens,
 		ProcessingDurationMs: &durationMs,
+		Language:             req.Language,
 	}
 
 	if err := s.summaryRepo.Create(ctx, summary); err != nil {

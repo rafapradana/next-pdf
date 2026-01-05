@@ -37,6 +37,7 @@ type Summary struct {
 	ProcessingStartedAt   *time.Time   `json:"processing_started_at"`
 	ProcessingCompletedAt *time.Time   `json:"processing_completed_at"`
 	ProcessingDurationMs  *int         `json:"processing_duration_ms"`
+	Language              string       `json:"language"`
 	Version               int          `json:"version"`
 	IsCurrent             bool         `json:"is_current"`
 	CreatedAt             time.Time    `json:"created_at"`
@@ -55,6 +56,7 @@ type SummaryResponse struct {
 	ProcessingStartedAt   *time.Time   `json:"processing_started_at,omitempty"`
 	ProcessingCompletedAt *time.Time   `json:"processing_completed_at,omitempty"`
 	ProcessingDurationMs  *int         `json:"processing_duration_ms,omitempty"`
+	Language              string       `json:"language"`
 	Version               int          `json:"version"`
 	IsCurrent             bool         `json:"is_current"`
 	CreatedAt             time.Time    `json:"created_at"`
@@ -68,6 +70,7 @@ type SummaryHistoryItem struct {
 	CustomInstructions   *string      `json:"custom_instructions,omitempty"`
 	ModelUsed            *string      `json:"model_used,omitempty"`
 	ProcessingDurationMs *int         `json:"processing_duration_ms,omitempty"`
+	Language             string       `json:"language"`
 	IsCurrent            bool         `json:"is_current"`
 	CreatedAt            time.Time    `json:"created_at"`
 }
@@ -75,6 +78,7 @@ type SummaryHistoryItem struct {
 type GenerateSummaryRequest struct {
 	Style              SummaryStyle `json:"style" validate:"required"`
 	CustomInstructions *string      `json:"custom_instructions" validate:"omitempty,max=500"`
+	Language           string       `json:"language" validate:"omitempty,oneof=en id"`
 }
 
 type SummaryStatusResponse struct {
@@ -146,6 +150,7 @@ type SummaryCallbackRequest struct {
 	PromptTokens         int          `json:"prompt_tokens"`
 	CompletionTokens     int          `json:"completion_tokens"`
 	ProcessingDurationMs int          `json:"processing_duration_ms"`
+	Language             string       `json:"language"`
 	Status               string       `json:"status"`
 	ErrorMessage         string       `json:"error_message,omitempty"`
 }
@@ -156,5 +161,6 @@ type AIServiceRequest struct {
 	StoragePath        string  `json:"storage_path"`
 	Style              string  `json:"style"`
 	CustomInstructions *string `json:"custom_instructions,omitempty"`
+	Language           string  `json:"language"`
 	CallbackURL        string  `json:"callback_url,omitempty"`
 }

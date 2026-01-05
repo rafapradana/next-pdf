@@ -13,8 +13,9 @@ import (
 )
 
 type Storage struct {
-	client *minio.Client
-	cfg    config.MinIOConfig
+	client        *minio.Client
+	presignClient *minio.Client
+	cfg           config.MinIOConfig
 }
 
 func New(cfg config.MinIOConfig) (*Storage, error) {
@@ -26,9 +27,26 @@ func New(cfg config.MinIOConfig) (*Storage, error) {
 		return nil, fmt.Errorf("failed to create minio client: %w", err)
 	}
 
+	// Initialize presign client with public endpoint (for correct signature generation)
+	// If PublicEndpoint is not set or same as Endpoint, it will match client
+	presignEndpoint := cfg.Endpoint
+	if cfg.PublicEndpoint != "" {
+		presignEndpoint = cfg.PublicEndpoint
+	}
+
+	presignClient, err := minio.New(presignEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Secure: cfg.UseSSL,
+		Region: "us-east-1",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create minio presign client: %w", err)
+	}
+
 	return &Storage{
-		client: client,
-		cfg:    cfg,
+		client:        client,
+		presignClient: presignClient,
+		cfg:           cfg,
 	}, nil
 }
 
@@ -52,28 +70,14 @@ func (s *Storage) EnsureBuckets(ctx context.Context) error {
 }
 
 func (s *Storage) GeneratePresignedPutURL(ctx context.Context, bucket, objectName, contentType string, size int64) (*url.URL, error) {
-	presignedURL, err := s.client.PresignedPutObject(ctx, bucket, objectName, s.cfg.PresignExpiryMin)
-	if err != nil {
-		return nil, err
-	}
-	return s.rewriteURLForPublicAccess(presignedURL), nil
+	// Use presignClient to generate URL with public endpoint and correct signature
+	return s.presignClient.PresignedPutObject(ctx, bucket, objectName, s.cfg.PresignExpiryMin)
 }
 
 func (s *Storage) GeneratePresignedGetURL(ctx context.Context, bucket, objectName string, expiry time.Duration) (*url.URL, error) {
 	reqParams := make(url.Values)
-	presignedURL, err := s.client.PresignedGetObject(ctx, bucket, objectName, expiry, reqParams)
-	if err != nil {
-		return nil, err
-	}
-	return s.rewriteURLForPublicAccess(presignedURL), nil
-}
-
-// rewriteURLForPublicAccess replaces internal Docker endpoint with public endpoint
-func (s *Storage) rewriteURLForPublicAccess(u *url.URL) *url.URL {
-	if s.cfg.PublicEndpoint != "" && s.cfg.PublicEndpoint != s.cfg.Endpoint {
-		u.Host = s.cfg.PublicEndpoint
-	}
-	return u
+	// Use presignClient to generate URL with public endpoint and correct signature
+	return s.presignClient.PresignedGetObject(ctx, bucket, objectName, expiry, reqParams)
 }
 
 func (s *Storage) ObjectExists(ctx context.Context, bucket, objectName string) (bool, error) {
@@ -130,5 +134,9 @@ func (s *Storage) GetPublicURL(bucket, objectName string) string {
 	if s.cfg.UseSSL {
 		protocol = "https"
 	}
-	return fmt.Sprintf("%s://%s/%s/%s", protocol, s.cfg.Endpoint, bucket, objectName)
+	host := s.cfg.Endpoint
+	if s.cfg.PublicEndpoint != "" {
+		host = s.cfg.PublicEndpoint
+	}
+	return fmt.Sprintf("%s://%s/%s/%s", protocol, host, bucket, objectName)
 }

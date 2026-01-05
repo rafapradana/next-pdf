@@ -33,12 +33,18 @@ func NewAIClient() *AIClient {
 }
 
 // RequestSummary sends a request to the AI service to generate a summary
-func (c *AIClient) RequestSummary(ctx context.Context, fileID uuid.UUID, storagePath string, style models.SummaryStyle, customInstructions *string) error {
+func (c *AIClient) RequestSummary(ctx context.Context, fileID uuid.UUID, storagePath string, style models.SummaryStyle, customInstructions *string, language string) error {
+	// Default to English if not specified
+	if language == "" {
+		language = "en"
+	}
+
 	request := models.AIServiceRequest{
 		FileID:             fileID.String(),
 		StoragePath:        storagePath,
 		Style:              string(style),
 		CustomInstructions: customInstructions,
+		Language:           language,
 	}
 
 	jsonData, err := json.Marshal(request)

@@ -25,24 +25,35 @@ import {
   Loader2,
   AlertCircle,
   FileText,
+  Languages,
+  Check,
 } from "lucide-react";
 
 interface SummaryPanelProps {
   file: FileItem;
 }
 
+const LANGUAGES = [
+  { id: "en", name: "English", flag: "🇺🇸" },
+  { id: "id", name: "Indonesia", flag: "🇮🇩" },
+];
+
 export function SummaryPanel({ file }: SummaryPanelProps) {
   const {
     currentSummary,
+    summaryHistory,
     summaryStyles,
     isLoadingSummary,
+    isLoadingHistory,
     isGeneratingSummary,
     loadSummary,
+    loadSummaryHistory,
     loadSummaryStyles,
     generateSummary,
   } = useFiles();
 
   const [selectedStyle, setSelectedStyle] = useState("bullet_points");
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
   const [customInstructions, setCustomInstructions] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -51,12 +62,13 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     loadSummaryStyles();
   }, [loadSummaryStyles]);
 
-  // Load summary when file changes
+  // Load summary and history when file changes
   useEffect(() => {
     if (file.id) {
       loadSummary(file.id);
+      loadSummaryHistory(file.id);
     }
-  }, [file.id, loadSummary]);
+  }, [file.id, loadSummary, loadSummaryHistory]);
 
   const handleGenerate = async () => {
     if (!file.id) return;
@@ -69,7 +81,8 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     const result = await generateSummary(
       file.id,
       selectedStyle,
-      customInstructions || undefined
+      customInstructions || undefined,
+      selectedLanguage
     );
 
     if (result.success) {
@@ -87,16 +100,37 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getLanguageName = (langCode: string) => {
+    return LANGUAGES.find(l => l.id === langCode)?.name || langCode;
+  };
+
+  const getLanguageFlag = (langCode: string) => {
+    return LANGUAGES.find(l => l.id === langCode)?.flag || "🌐";
+  };
+
   return (
     <div className="flex h-full flex-col">
       <Tabs defaultValue="summary" className="flex h-full flex-col">
         <div className="border-b px-4 py-2">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="generate">Generate</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
         </div>
 
+        {/* Summary Tab */}
         <TabsContent value="summary" className="flex-1 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-4">
@@ -131,6 +165,10 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                       </Badge>
                       <Badge variant="outline" className="gap-1">
                         <History className="h-3 w-3" />v{currentSummary.version}
+                      </Badge>
+                      <Badge variant="outline" className="gap-1">
+                        <span>{getLanguageFlag(currentSummary.language)}</span>
+                        {getLanguageName(currentSummary.language)}
                       </Badge>
                     </div>
                   </div>
@@ -177,6 +215,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
           </ScrollArea>
         </TabsContent>
 
+        {/* Generate Tab */}
         <TabsContent value="generate" className="flex-1 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-6">
@@ -204,13 +243,35 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="language">
+                  <Languages className="h-4 w-4 inline mr-1" />
+                  Summary Language
+                </Label>
+                <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                  <SelectTrigger id="language">
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGES.map((lang) => (
+                      <SelectItem key={lang.id} value={lang.id}>
+                        <span className="flex items-center gap-2">
+                          <span>{lang.flag}</span>
+                          <span>{lang.name}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="instructions">
                   Custom Instructions{" "}
                   <span className="text-muted-foreground">(optional)</span>
                 </Label>
                 <Textarea
                   id="instructions"
-                  placeholder="e.g., Focus on methodology and key findings. Summarize in Indonesian."
+                  placeholder="e.g., Focus on methodology and key findings."
                   value={customInstructions}
                   onChange={(e) => setCustomInstructions(e.target.value)}
                   maxLength={500}
@@ -257,6 +318,83 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                 <p className="text-xs text-muted-foreground text-center">
                   This will create a new version of the summary.
                 </p>
+              )}
+            </div>
+          </ScrollArea>
+        </TabsContent>
+
+        {/* History Tab */}
+        <TabsContent value="history" className="flex-1 overflow-hidden m-0">
+          <ScrollArea className="h-full">
+            <div className="p-4">
+              {isLoadingHistory ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                </div>
+              ) : summaryHistory.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground mb-4">
+                    {summaryHistory.length} summary version{summaryHistory.length > 1 ? 's' : ''} generated
+                  </p>
+                  {summaryHistory.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`p-3 rounded-lg border ${item.is_current
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:bg-muted/50"
+                        } transition-colors`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm truncate">
+                              {item.title || `Version ${item.version}`}
+                            </span>
+                            {item.is_current && (
+                              <Badge variant="default" className="gap-1 h-5 text-xs">
+                                <Check className="h-3 w-3" />
+                                Current
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {formatDuration(item.processing_duration_ms)}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              {getLanguageFlag(item.language)} {getLanguageName(item.language)}
+                            </span>
+                            <span>
+                              {summaryStyles.find((s) => s.id === item.style)?.name || item.style}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground whitespace-nowrap">
+                          v{item.version}
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {formatDate(item.created_at)}
+                      </p>
+                      {item.model_used && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Model: {item.model_used}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <History className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                  <h3 className="font-medium">No History Yet</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Generate a summary to start building history.
+                  </p>
+                </div>
               )}
             </div>
           </ScrollArea>

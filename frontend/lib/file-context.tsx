@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { api, FolderTreeItem, FileItem, Summary, SummaryStyle } from './api';
+import { api, FolderTreeItem, FileItem, Summary, SummaryStyle, SummaryHistoryItem } from './api';
 
 interface FileContextType {
   folders: FolderTreeItem[];
@@ -9,16 +9,19 @@ interface FileContextType {
   selectedFile: FileItem | null;
   selectedFolderId: string | null;
   currentSummary: Summary | null;
+  summaryHistory: SummaryHistoryItem[];
   summaryStyles: SummaryStyle[];
   isLoadingFolders: boolean;
   isLoadingFiles: boolean;
   isLoadingSummary: boolean;
+  isLoadingHistory: boolean;
   isGeneratingSummary: boolean;
   refreshFolders: () => Promise<void>;
   refreshFiles: (folderId?: string | null) => Promise<void>;
   selectFile: (file: FileItem | null) => void;
   selectFolder: (folderId: string | null) => void;
   loadSummary: (fileId: string) => Promise<void>;
+  loadSummaryHistory: (fileId: string) => Promise<void>;
   loadSummaryStyles: () => Promise<void>;
   createFolder: (name: string, parentId?: string | null) => Promise<{ success: boolean; error?: string }>;
   renameFolder: (id: string, name: string) => Promise<{ success: boolean; error?: string }>;
@@ -28,7 +31,7 @@ interface FileContextType {
   moveFile: (id: string, folderId: string | null) => Promise<{ success: boolean; error?: string }>;
   renameFile: (id: string, name: string) => Promise<{ success: boolean; error?: string }>;
   deleteFile: (id: string) => Promise<{ success: boolean; error?: string }>;
-  generateSummary: (fileId: string, style: string, customInstructions?: string) => Promise<{ success: boolean; error?: string }>;
+  generateSummary: (fileId: string, style: string, customInstructions?: string, language?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const FileContext = createContext<FileContextType | undefined>(undefined);
@@ -39,10 +42,12 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [currentSummary, setCurrentSummary] = useState<Summary | null>(null);
+  const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryItem[]>([]);
   const [summaryStyles, setSummaryStyles] = useState<SummaryStyle[]>([]);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   const refreshFolders = useCallback(async () => {
@@ -86,6 +91,17 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
       setCurrentSummary(null);
     }
     setIsLoadingSummary(false);
+  }, []);
+
+  const loadSummaryHistory = useCallback(async (fileId: string) => {
+    setIsLoadingHistory(true);
+    const response = await api.getSummaryHistory(fileId);
+    if (response.data) {
+      setSummaryHistory(response.data);
+    } else {
+      setSummaryHistory([]);
+    }
+    setIsLoadingHistory(false);
   }, []);
 
   const loadSummaryStyles = useCallback(async () => {
@@ -217,13 +233,13 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
     return { success: false, error: response.error?.message };
   }, [refreshFiles, selectedFile]);
 
-  const generateSummary = useCallback(async (fileId: string, style: string, customInstructions?: string) => {
+  const generateSummary = useCallback(async (fileId: string, style: string, customInstructions?: string, language: string = 'en') => {
     setIsGeneratingSummary(true);
 
     // Get current version to check against
     const currentVersion = currentSummary?.version || 0;
 
-    const response = await api.generateSummary(fileId, style, customInstructions);
+    const response = await api.generateSummary(fileId, style, customInstructions, language);
     if (response.data) {
       // Poll for summary completion
       const pollSummary = async () => {
@@ -233,6 +249,8 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
           // Only update if we got a newer version OR if we had no summary before
           if (newSummary.version > currentVersion) {
             setCurrentSummary(newSummary);
+            // Also refresh history
+            loadSummaryHistory(fileId);
             return true;
           }
         }
@@ -261,7 +279,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
     }
     setIsGeneratingSummary(false);
     return { success: false, error: response.error?.message };
-  }, [currentSummary]);
+  }, [currentSummary, loadSummaryHistory]);
 
   return (
     <FileContext.Provider
@@ -271,16 +289,19 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
         selectedFile,
         selectedFolderId,
         currentSummary,
+        summaryHistory,
         summaryStyles,
         isLoadingFolders,
         isLoadingFiles,
         isLoadingSummary,
+        isLoadingHistory,
         isGeneratingSummary,
         refreshFolders,
         refreshFiles,
         selectFile,
         selectFolder,
         loadSummary,
+        loadSummaryHistory,
         loadSummaryStyles,
         createFolder,
         renameFolder,

@@ -143,6 +143,14 @@ CREATE TABLE files (
     page_count INTEGER,                -- Number of pages (extracted after upload)
     status processing_status DEFAULT 'uploaded',
     error_message TEXT,                -- Error details if status = 'failed'
+    -- Latest summary cache fields (synced from summaries table via trigger)
+    latest_summary_title VARCHAR(500),
+    latest_summary TEXT,
+    latest_summary_style summary_style,
+    latest_summary_custom_instruction TEXT,
+    latest_summary_model VARCHAR(100),
+    latest_summary_duration_ms INTEGER,
+    latest_summary_language VARCHAR(10) DEFAULT 'en',
     uploaded_at TIMESTAMPTZ DEFAULT NOW(),
     processed_at TIMESTAMPTZ,          -- When processing completed
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -188,6 +196,7 @@ CREATE TABLE summaries (
     processing_started_at TIMESTAMPTZ, -- For processing time calculation
     processing_completed_at TIMESTAMPTZ,
     processing_duration_ms INTEGER,    -- Duration in milliseconds
+    language VARCHAR(10) DEFAULT 'en', -- Summary language (en/id)
     version INTEGER DEFAULT 1,         -- Summary version (for regeneration)
     is_current BOOLEAN DEFAULT TRUE,   -- Flag for current/latest summary
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -387,6 +396,34 @@ CREATE TRIGGER trigger_summaries_new
     BEFORE INSERT ON summaries
     FOR EACH ROW
     EXECUTE FUNCTION handle_new_summary();
+
+-- Trigger function to sync latest summary to files table
+CREATE OR REPLACE FUNCTION sync_summary_to_file()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only sync if this is the current summary
+    IF NEW.is_current = TRUE THEN
+        UPDATE files
+        SET
+            latest_summary_title = NEW.title,
+            latest_summary = NEW.content,
+            latest_summary_style = NEW.style,
+            latest_summary_custom_instruction = NEW.custom_instructions,
+            latest_summary_model = NEW.model_used,
+            latest_summary_duration_ms = NEW.processing_duration_ms,
+            latest_summary_language = COALESCE(NEW.language, 'en'),
+            updated_at = NOW()
+        WHERE id = NEW.file_id;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_sync_summary_to_file
+    AFTER INSERT ON summaries
+    FOR EACH ROW
+    EXECUTE FUNCTION sync_summary_to_file();
 
 -- ============================================================================
 -- 12. HELPER VIEWS

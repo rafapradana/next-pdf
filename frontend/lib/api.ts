@@ -322,7 +322,7 @@ class ApiClient {
     return this.request<SummaryHistoryItem[]>(`/summaries/${fileId}/history`);
   }
 
-  async generateSummary(fileId: string, style: string, customInstructions?: string) {
+  async generateSummary(fileId: string, style: string, customInstructions?: string, language: string = 'en') {
     return this.request<{
       file_id: string;
       status: string;
@@ -331,7 +331,7 @@ class ApiClient {
       custom_instructions?: string;
     }>(`/summaries/${fileId}/generate`, {
       method: 'POST',
-      body: JSON.stringify({ style, custom_instructions: customInstructions }),
+      body: JSON.stringify({ style, custom_instructions: customInstructions, language }),
     });
   }
 }
@@ -390,6 +390,7 @@ export interface Summary {
   processing_started_at: string;
   processing_completed_at: string;
   processing_duration_ms: number;
+  language: string;
   version: number;
   is_current: boolean;
   created_at: string;
@@ -403,6 +404,7 @@ export interface SummaryHistoryItem {
   custom_instructions?: string;
   model_used: string;
   processing_duration_ms: number;
+  language: string;
   is_current: boolean;
   created_at: string;
 }

@@ -33,6 +33,7 @@ class SummarizeRequest(BaseModel):
     storage_path: str = Field(..., description="Path to file in MinIO storage")
     style: str = Field(default="bullet_points", description="Summary style")
     custom_instructions: Optional[str] = Field(None, max_length=500)
+    language: str = Field(default="en", description="Summary language: 'en' or 'id'")
     callback_url: Optional[str] = Field(None, description="URL to callback when complete")
 
 
@@ -50,10 +51,11 @@ class SummaryResult(BaseModel):
     content: str
     style: str
     custom_instructions: Optional[str]
-    model_used: str = "gemini-1.5-flash"
+    model_used: str = "gemini-2.5-flash"
     prompt_tokens: int
     completion_tokens: int
     processing_duration_ms: int
+    language: str = "en"
     status: str  # "completed" or "failed"
     error_message: Optional[str] = None
 
@@ -148,6 +150,7 @@ async def summarize(request: SummarizeRequest, background_tasks: BackgroundTasks
         request.storage_path,
         request.style,
         request.custom_instructions,
+        request.language,
         request.callback_url
     )
     
@@ -163,13 +166,14 @@ async def process_summary(
     storage_path: str,
     style: str,
     custom_instructions: Optional[str],
+    language: str,
     callback_url: Optional[str]
 ):
     """Background task to process PDF and generate summary"""
     start_time = time.time()
     
     try:
-        logger.info(f"Processing summary for file: {file_id}")
+        logger.info(f"Processing summary for file: {file_id} (language: {language})")
         
         # Download PDF from MinIO
         if not minio_client:
@@ -192,11 +196,12 @@ async def process_summary(
         
         logger.info(f"Extracted text: {len(text)} characters")
         
-        # Generate summary
+        # Generate summary with language
         title, content, prompt_tokens, completion_tokens = summarizer.generate_summary(
             text=text,
             style=style,
-            custom_instructions=custom_instructions
+            custom_instructions=custom_instructions,
+            language=language
         )
         
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -212,6 +217,7 @@ async def process_summary(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             processing_duration_ms=processing_time_ms,
+            language=language,
             status="completed"
         )
         
@@ -231,6 +237,7 @@ async def process_summary(
             prompt_tokens=0,
             completion_tokens=0,
             processing_duration_ms=processing_time_ms,
+            language=language,
             status="failed",
             error_message=str(e)
         )

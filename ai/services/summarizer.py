@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 MAX_SINGLE_CHUNK_SIZE = 30000
 
 
-# Summary style prompts
-STYLE_PROMPTS = {
+# Summary style prompts - English
+STYLE_PROMPTS_EN = {
     "bullet_points": """Create a concise bullet-point summary of the document.
 Format the output with clear bullet points (•) for main points.
 Focus on the key information and main takeaways.
@@ -53,6 +53,55 @@ Structure with these sections:
 Use formal academic language."""
 }
 
+# Summary style prompts - Indonesian
+STYLE_PROMPTS_ID = {
+    "bullet_points": """Buatlah ringkasan dokumen dalam format poin-poin singkat.
+Gunakan bullet points (•) yang jelas untuk poin-poin utama.
+Fokus pada informasi kunci dan kesimpulan penting.
+Buat setiap poin singkat dan dapat ditindaklanjuti.
+Gunakan Bahasa Indonesia yang baik dan benar.""",
+    
+    "paragraph": """Buatlah ringkasan dokumen dalam bentuk paragraf naratif yang mengalir.
+Tulis dengan gaya prosa yang jelas dan profesional.
+Susun informasi secara logis dari yang paling penting.
+Buat 2-4 paragraf tergantung panjang dokumen.
+Gunakan Bahasa Indonesia yang baik dan benar.""",
+    
+    "detailed": """Buatlah analisis detail dan komprehensif dari dokumen ini.
+Gunakan heading markdown (##) untuk mengorganisir bagian-bagian.
+Sertakan:
+- Ikhtisar/Pendahuluan
+- Temuan Kunci atau Poin Utama
+- Detail Pendukung
+- Kesimpulan
+Buatlah menyeluruh namun hindari pengulangan.
+Gunakan Bahasa Indonesia yang baik dan benar.""",
+    
+    "executive": """Buatlah ringkasan eksekutif untuk pengambil keputusan yang sibuk.
+Mulai dengan pernyataan "Kesimpulan Utama".
+Lanjutkan dengan 3-5 poin kunci.
+Fokus pada wawasan yang dapat ditindaklanjuti dan implikasi bisnis.
+Buat singkat - maksimal satu halaman.
+Gunakan Bahasa Indonesia yang baik dan benar.""",
+    
+    "academic": """Buatlah ringkasan bergaya akademis dari dokumen ini.
+Struktur dengan bagian-bagian ini:
+- **Abstrak**: Ikhtisar singkat (2-3 kalimat)
+- **Argumen/Temuan Kunci**: Poin-poin utama dari teks
+- **Metodologi** (jika ada): Bagaimana kesimpulan dicapai
+- **Kesimpulan**: Kesimpulan akhir
+Gunakan bahasa akademis formal dalam Bahasa Indonesia."""
+}
+
+# Language instruction additions
+LANGUAGE_INSTRUCTIONS = {
+    "en": "Write the summary in English.",
+    "id": "Tulis ringkasan dalam Bahasa Indonesia yang baik dan benar."
+}
+
+# For backward compatibility
+STYLE_PROMPTS = STYLE_PROMPTS_EN
+
 
 class Summarizer:
     """Handles AI-powered summarization using Google Gemini with chunking support"""
@@ -73,7 +122,8 @@ class Summarizer:
         text: str,
         style: str = "bullet_points",
         custom_instructions: Optional[str] = None,
-        title_hint: Optional[str] = None
+        title_hint: Optional[str] = None,
+        language: str = "en"
     ) -> Tuple[str, str, int, int]:
         """
         Generate a summary of the given text, using chunking for large documents
@@ -83,6 +133,7 @@ class Summarizer:
             style: Summary style (bullet_points, paragraph, detailed, executive, academic)
             custom_instructions: Optional custom instructions from user
             title_hint: Optional filename hint for title generation
+            language: Language for summary output ('en' for English, 'id' for Indonesian)
             
         Returns:
             Tuple of (title, summary_content, prompt_tokens, completion_tokens)
@@ -93,22 +144,29 @@ class Summarizer:
         # Use chunking for large documents
         if len(text) > MAX_SINGLE_CHUNK_SIZE:
             logger.info(f"Document is large ({len(text)} chars), using chunked summarization")
-            return self._summarize_with_chunks(text, style, custom_instructions, title_hint)
+            return self._summarize_with_chunks(text, style, custom_instructions, title_hint, language)
         
-        return self._summarize_single(text, style, custom_instructions, title_hint)
+        return self._summarize_single(text, style, custom_instructions, title_hint, language)
     
     def _summarize_single(
         self,
         text: str,
         style: str,
         custom_instructions: Optional[str],
-        title_hint: Optional[str]
+        title_hint: Optional[str],
+        language: str = "en"
     ) -> Tuple[str, str, int, int]:
         """Generate summary for a single chunk of text"""
-        style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["bullet_points"])
+        # Select prompts based on language
+        prompts = STYLE_PROMPTS_ID if language == "id" else STYLE_PROMPTS_EN
+        style_prompt = prompts.get(style, prompts["bullet_points"])
+        lang_instruction = LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS["en"])
         
         prompt_parts = [
             "You are an expert document summarizer. Your task is to create a high-quality summary.",
+            "",
+            "LANGUAGE REQUIREMENT:",
+            lang_instruction,
             "",
             "STYLE INSTRUCTIONS:",
             style_prompt,
@@ -129,8 +187,8 @@ class Summarizer:
             "---",
             "",
             "Please provide:",
-            "1. A concise, descriptive title for this document (max 100 characters)",
-            "2. The summary following the style instructions above",
+            "1. A concise, descriptive title for this document (max 100 characters)" + (" in Indonesian" if language == "id" else ""),
+            "2. The summary following the style and language instructions above",
             "",
             "Format your response as:",
             "TITLE: [Your generated title]",
@@ -172,7 +230,8 @@ class Summarizer:
         text: str,
         style: str,
         custom_instructions: Optional[str],
-        title_hint: Optional[str]
+        title_hint: Optional[str],
+        language: str = "en"
     ) -> Tuple[str, str, int, int]:
         """Generate summary using chunked processing for large documents"""
         
@@ -189,7 +248,7 @@ class Summarizer:
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
             
-            chunk_prompt = self._build_chunk_prompt(chunk, style, custom_instructions, i, len(chunks))
+            chunk_prompt = self._build_chunk_prompt(chunk, style, custom_instructions, i, len(chunks), language)
             
             try:
                 response = self.model.generate_content(
@@ -225,7 +284,7 @@ class Summarizer:
         if len(chunk_summaries) == 1:
             final_summary = chunk_summaries[0]
         else:
-            final_summary = self._merge_chunk_summaries(chunk_summaries, style)
+            final_summary = self._merge_chunk_summaries(chunk_summaries, style, language)
         
         return title, final_summary, int(total_prompt_tokens), int(total_completion_tokens)
     
@@ -235,13 +294,18 @@ class Summarizer:
         style: str,
         custom_instructions: Optional[str],
         chunk_index: int,
-        total_chunks: int
+        total_chunks: int,
+        language: str = "en"
     ) -> str:
         """Build prompt for a single chunk"""
-        style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["bullet_points"])
+        prompts = STYLE_PROMPTS_ID if language == "id" else STYLE_PROMPTS_EN
+        style_prompt = prompts.get(style, prompts["bullet_points"])
+        lang_instruction = LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS["en"])
         
         parts = [
             f"You are summarizing part {chunk_index + 1} of {total_chunks} of a document.",
+            "",
+            "LANGUAGE:", lang_instruction,
             "",
             "STYLE:", style_prompt,
         ]
@@ -254,18 +318,38 @@ class Summarizer:
         ])
         
         if chunk_index == 0:
-            parts.append("Provide: TITLE: [title] then SUMMARY: [summary]")
+            title_lang = "Berikan: TITLE: [judul] kemudian SUMMARY: [ringkasan]" if language == "id" else "Provide: TITLE: [title] then SUMMARY: [summary]"
+            parts.append(title_lang)
         else:
-            parts.append("Provide the key points from this section.")
+            key_points = "Berikan poin-poin kunci dari bagian ini." if language == "id" else "Provide the key points from this section."
+            parts.append(key_points)
         
         return "\n".join(parts)
     
-    def _merge_chunk_summaries(self, summaries: List[str], style: str) -> str:
+    def _merge_chunk_summaries(self, summaries: List[str], style: str, language: str = "en") -> str:
         """Merge summaries from multiple chunks into final summary"""
         combined = "\n\n".join(summaries)
+        lang_instruction = LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS["en"])
         
-        merge_prompt = f"""You have summaries from different parts of a document.
+        if language == "id":
+            merge_prompt = f"""Anda memiliki ringkasan dari berbagai bagian dokumen.
+Gabungkan menjadi satu ringkasan {style.replace('_', ' ')} yang kohesif.
+
+{lang_instruction}
+
+RINGKASAN BAGIAN:
+{combined}
+
+Buat ringkasan terpadu yang:
+- Menghilangkan pengulangan
+- Mempertahankan alur logis
+- Menyimpan poin-poin paling penting
+- Menggunakan format {style.replace('_', ' ')}"""
+        else:
+            merge_prompt = f"""You have summaries from different parts of a document.
 Merge them into one cohesive {style.replace('_', ' ')} summary.
+
+{lang_instruction}
 
 CHUNK SUMMARIES:
 {combined}

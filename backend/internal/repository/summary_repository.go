@@ -31,13 +31,20 @@ type SummaryCreate struct {
 	PromptTokens         *int
 	CompletionTokens     *int
 	ProcessingDurationMs *int
+	Language             string
 }
 
 func (r *SummaryRepository) Create(ctx context.Context, summary *SummaryCreate) error {
+	// Default language to English if not specified
+	lang := summary.Language
+	if lang == "" {
+		lang = "en"
+	}
+
 	query := `
 		INSERT INTO summaries (file_id, title, content, style, custom_instructions, model_used,
-		                       prompt_tokens, completion_tokens, processing_duration_ms, is_current)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+		                       prompt_tokens, completion_tokens, processing_duration_ms, language, is_current)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
 		RETURNING id
 	`
 
@@ -45,7 +52,7 @@ func (r *SummaryRepository) Create(ctx context.Context, summary *SummaryCreate) 
 	return r.db.QueryRow(ctx, query,
 		summary.FileID, summary.Title, summary.Content, summary.Style,
 		summary.CustomInstructions, summary.ModelUsed, summary.PromptTokens,
-		summary.CompletionTokens, summary.ProcessingDurationMs,
+		summary.CompletionTokens, summary.ProcessingDurationMs, lang,
 	).Scan(&id)
 }
 
@@ -53,7 +60,7 @@ func (r *SummaryRepository) GetCurrentByFileID(ctx context.Context, fileID uuid.
 	query := `
 		SELECT id, file_id, title, content, style, custom_instructions, model_used,
 		       prompt_tokens, completion_tokens, processing_started_at, processing_completed_at,
-		       processing_duration_ms, version, is_current, created_at
+		       processing_duration_ms, COALESCE(language, 'en') as language, version, is_current, created_at
 		FROM summaries
 		WHERE file_id = $1 AND is_current = true
 	`
@@ -63,7 +70,7 @@ func (r *SummaryRepository) GetCurrentByFileID(ctx context.Context, fileID uuid.
 		&summary.ID, &summary.FileID, &summary.Title, &summary.Content, &summary.Style,
 		&summary.CustomInstructions, &summary.ModelUsed, &summary.PromptTokens,
 		&summary.CompletionTokens, &summary.ProcessingStartedAt, &summary.ProcessingCompletedAt,
-		&summary.ProcessingDurationMs, &summary.Version, &summary.IsCurrent, &summary.CreatedAt,
+		&summary.ProcessingDurationMs, &summary.Language, &summary.Version, &summary.IsCurrent, &summary.CreatedAt,
 	)
 
 	if err != nil {
@@ -80,7 +87,7 @@ func (r *SummaryRepository) GetByFileIDAndVersion(ctx context.Context, fileID uu
 	query := `
 		SELECT id, file_id, title, content, style, custom_instructions, model_used,
 		       prompt_tokens, completion_tokens, processing_started_at, processing_completed_at,
-		       processing_duration_ms, version, is_current, created_at
+		       processing_duration_ms, COALESCE(language, 'en') as language, version, is_current, created_at
 		FROM summaries
 		WHERE file_id = $1 AND version = $2
 	`
@@ -90,7 +97,7 @@ func (r *SummaryRepository) GetByFileIDAndVersion(ctx context.Context, fileID uu
 		&summary.ID, &summary.FileID, &summary.Title, &summary.Content, &summary.Style,
 		&summary.CustomInstructions, &summary.ModelUsed, &summary.PromptTokens,
 		&summary.CompletionTokens, &summary.ProcessingStartedAt, &summary.ProcessingCompletedAt,
-		&summary.ProcessingDurationMs, &summary.Version, &summary.IsCurrent, &summary.CreatedAt,
+		&summary.ProcessingDurationMs, &summary.Language, &summary.Version, &summary.IsCurrent, &summary.CreatedAt,
 	)
 
 	if err != nil {
@@ -106,7 +113,7 @@ func (r *SummaryRepository) GetByFileIDAndVersion(ctx context.Context, fileID uu
 func (r *SummaryRepository) GetHistoryByFileID(ctx context.Context, fileID uuid.UUID) ([]*models.SummaryHistoryItem, error) {
 	query := `
 		SELECT id, version, title, style, custom_instructions, model_used,
-		       processing_duration_ms, is_current, created_at
+		       processing_duration_ms, COALESCE(language, 'en') as language, is_current, created_at
 		FROM summaries
 		WHERE file_id = $1
 		ORDER BY version DESC
@@ -124,7 +131,7 @@ func (r *SummaryRepository) GetHistoryByFileID(ctx context.Context, fileID uuid.
 		err := rows.Scan(
 			&item.ID, &item.Version, &item.Title, &item.Style,
 			&item.CustomInstructions, &item.ModelUsed,
-			&item.ProcessingDurationMs, &item.IsCurrent, &item.CreatedAt,
+			&item.ProcessingDurationMs, &item.Language, &item.IsCurrent, &item.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
