@@ -13,6 +13,7 @@ interface FileContextType {
   isLoadingFolders: boolean;
   isLoadingFiles: boolean;
   isLoadingSummary: boolean;
+  isGeneratingSummary: boolean;
   refreshFolders: () => Promise<void>;
   refreshFiles: (folderId?: string | null) => Promise<void>;
   selectFile: (file: FileItem | null) => void;
@@ -42,6 +43,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   const refreshFolders = useCallback(async () => {
     setIsLoadingFolders(true);
@@ -54,7 +56,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
 
   const refreshFiles = useCallback(async (folderId?: string | null) => {
     setIsLoadingFiles(true);
-    const response = await api.getFiles({ 
+    const response = await api.getFiles({
       folder_id: folderId === undefined ? selectedFolderId : folderId,
       sort: '-uploaded_at'
     });
@@ -216,14 +218,23 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
   }, [refreshFiles, selectedFile]);
 
   const generateSummary = useCallback(async (fileId: string, style: string, customInstructions?: string) => {
+    setIsGeneratingSummary(true);
+
+    // Get current version to check against
+    const currentVersion = currentSummary?.version || 0;
+
     const response = await api.generateSummary(fileId, style, customInstructions);
     if (response.data) {
       // Poll for summary completion
       const pollSummary = async () => {
         const summaryResponse = await api.getSummary(fileId);
         if (summaryResponse.data && 'content' in summaryResponse.data) {
-          setCurrentSummary(summaryResponse.data as Summary);
-          return true;
+          const newSummary = summaryResponse.data as Summary;
+          // Only update if we got a newer version OR if we had no summary before
+          if (newSummary.version > currentVersion) {
+            setCurrentSummary(newSummary);
+            return true;
+          }
         }
         return false;
       };
@@ -232,19 +243,25 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
       let attempts = 0;
       const maxAttempts = 30;
       const poll = async () => {
-        if (attempts >= maxAttempts) return;
+        if (attempts >= maxAttempts) {
+          setIsGeneratingSummary(false);
+          return;
+        }
         const done = await pollSummary();
         if (!done) {
           attempts++;
           setTimeout(poll, 2000);
+        } else {
+          setIsGeneratingSummary(false);
         }
       };
       poll();
 
       return { success: true };
     }
+    setIsGeneratingSummary(false);
     return { success: false, error: response.error?.message };
-  }, []);
+  }, [currentSummary]);
 
   return (
     <FileContext.Provider
@@ -258,6 +275,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
         isLoadingFolders,
         isLoadingFiles,
         isLoadingSummary,
+        isGeneratingSummary,
         refreshFolders,
         refreshFiles,
         selectFile,

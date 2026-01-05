@@ -36,6 +36,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     currentSummary,
     summaryStyles,
     isLoadingSummary,
+    isGeneratingSummary,
     loadSummary,
     loadSummaryStyles,
     generateSummary,
@@ -61,6 +62,10 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     if (!file.id) return;
 
     setIsGenerating(true);
+    // Switch to summary tab to show progress
+    const summaryTab = document.querySelector('[data-state="inactive"][value="summary"]') as HTMLElement;
+    summaryTab?.click();
+
     const result = await generateSummary(
       file.id,
       selectedStyle,
@@ -68,9 +73,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     );
 
     if (result.success) {
-      toast.success("Summary generation started", {
-        description: "This may take a few moments...",
-      });
+      toast.success("Summary generated successfully");
     } else {
       toast.error("Failed to generate summary", {
         description: result.error,
@@ -97,6 +100,13 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
         <TabsContent value="summary" className="flex-1 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-4">
+              {isGeneratingSummary && (
+                <div className="mb-4 flex items-center gap-2 rounded-md bg-blue-500/10 p-3 text-sm text-blue-600 dark:text-blue-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Generating new summary... This may take a few moments.</span>
+                </div>
+              )}
+
               {isLoadingSummary ? (
                 <div className="space-y-4">
                   <Skeleton className="h-6 w-3/4" />
