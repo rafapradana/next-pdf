@@ -124,3 +124,7 @@
     @apply bg-background text-foreground;
   }
 }
+
+@utility transform-style-3d {
+  transform-style: preserve-3d;
+}
