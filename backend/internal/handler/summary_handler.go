@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -145,6 +146,7 @@ func (h *SummaryHandler) Generate(c *fiber.Ctx) error {
 				"Invalid summary style. Valid options: bullet_points, paragraph, detailed, executive, academic",
 			))
 		}
+		log.Printf("ERROR: Failed to generate summary for file %s: %v", fileIDStr, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse(
 			"INTERNAL_ERROR",
 			"Failed to generate summary",

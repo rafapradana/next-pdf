@@ -60,6 +60,7 @@ type JWTConfig struct {
 
 type MinIOConfig struct {
 	Endpoint         string
+	PublicEndpoint   string // Browser-accessible endpoint
 	AccessKey        string
 	SecretKey        string
 	UseSSL           bool
@@ -106,6 +107,7 @@ func Load() (*Config, error) {
 		},
 		MinIO: MinIOConfig{
 			Endpoint:         getEnv("MINIO_ENDPOINT", "localhost:9000"),
+			PublicEndpoint:   getEnv("MINIO_PUBLIC_ENDPOINT", getEnv("MINIO_ENDPOINT", "localhost:9000")),
 			AccessKey:        getEnv("MINIO_ACCESS_KEY", "minioadmin"),
 			SecretKey:        getEnv("MINIO_SECRET_KEY", "minioadmin"),
 			UseSSL:           getEnvBool("MINIO_USE_SSL", false),

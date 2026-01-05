@@ -237,13 +237,23 @@ func (r *FileRepository) Rename(ctx context.Context, fileID, userID uuid.UUID, n
 }
 
 func (r *FileRepository) UpdateStatus(ctx context.Context, fileID uuid.UUID, status models.ProcessingStatus, errorMsg *string) error {
-	query := `
-		UPDATE files
-		SET status = $2, error_message = $3, 
-		    processed_at = CASE WHEN $2 IN ('completed', 'failed') THEN NOW() ELSE processed_at END,
-		    updated_at = NOW()
-		WHERE id = $1
-	`
+	statusStr := string(status)
+	updateProcessedAt := statusStr == "completed" || statusStr == "failed"
+
+	var query string
+	if updateProcessedAt {
+		query = `
+			UPDATE files
+			SET status = $2, error_message = $3, processed_at = NOW(), updated_at = NOW()
+			WHERE id = $1
+		`
+	} else {
+		query = `
+			UPDATE files
+			SET status = $2, error_message = $3, updated_at = NOW()
+			WHERE id = $1
+		`
+	}
 
 	result, err := r.db.Exec(ctx, query, fileID, status, errorMsg)
 	if err != nil {

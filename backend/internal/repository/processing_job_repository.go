@@ -114,13 +114,23 @@ func (r *ProcessingJobRepository) GetPendingByFileID(ctx context.Context, fileID
 }
 
 func (r *ProcessingJobRepository) UpdateStatus(ctx context.Context, jobID uuid.UUID, status JobStatus, errorMsg *string) error {
-	query := `
-		UPDATE processing_jobs
-		SET status = $2, error_message = $3,
-		    completed_at = CASE WHEN $2 IN ('completed', 'failed') THEN NOW() ELSE completed_at END,
-		    updated_at = NOW()
-		WHERE id = $1
-	`
+	statusStr := string(status)
+	updateCompletedAt := statusStr == "completed" || statusStr == "failed"
+
+	var query string
+	if updateCompletedAt {
+		query = `
+			UPDATE processing_jobs
+			SET status = $2, error_message = $3, completed_at = NOW(), updated_at = NOW()
+			WHERE id = $1
+		`
+	} else {
+		query = `
+			UPDATE processing_jobs
+			SET status = $2, error_message = $3, updated_at = NOW()
+			WHERE id = $1
+		`
+	}
 
 	result, err := r.db.Exec(ctx, query, jobID, status, errorMsg)
 	if err != nil {

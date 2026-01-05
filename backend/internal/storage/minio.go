@@ -52,12 +52,28 @@ func (s *Storage) EnsureBuckets(ctx context.Context) error {
 }
 
 func (s *Storage) GeneratePresignedPutURL(ctx context.Context, bucket, objectName, contentType string, size int64) (*url.URL, error) {
-	return s.client.PresignedPutObject(ctx, bucket, objectName, s.cfg.PresignExpiryMin)
+	presignedURL, err := s.client.PresignedPutObject(ctx, bucket, objectName, s.cfg.PresignExpiryMin)
+	if err != nil {
+		return nil, err
+	}
+	return s.rewriteURLForPublicAccess(presignedURL), nil
 }
 
 func (s *Storage) GeneratePresignedGetURL(ctx context.Context, bucket, objectName string, expiry time.Duration) (*url.URL, error) {
 	reqParams := make(url.Values)
-	return s.client.PresignedGetObject(ctx, bucket, objectName, expiry, reqParams)
+	presignedURL, err := s.client.PresignedGetObject(ctx, bucket, objectName, expiry, reqParams)
+	if err != nil {
+		return nil, err
+	}
+	return s.rewriteURLForPublicAccess(presignedURL), nil
+}
+
+// rewriteURLForPublicAccess replaces internal Docker endpoint with public endpoint
+func (s *Storage) rewriteURLForPublicAccess(u *url.URL) *url.URL {
+	if s.cfg.PublicEndpoint != "" && s.cfg.PublicEndpoint != s.cfg.Endpoint {
+		u.Host = s.cfg.PublicEndpoint
+	}
+	return u
 }
 
 func (s *Storage) ObjectExists(ctx context.Context, bucket, objectName string) (bool, error) {

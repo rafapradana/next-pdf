@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -272,6 +273,10 @@ func (s *FileService) Rename(ctx context.Context, userID, fileID uuid.UUID, newN
 func (s *FileService) Delete(ctx context.Context, userID, fileID uuid.UUID) error {
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
+		if errors.Is(err, repository.ErrFileNotFound) {
+			// If file is already gone, consider it a success (idempotent)
+			return nil
+		}
 		return err
 	}
 

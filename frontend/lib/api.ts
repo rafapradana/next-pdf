@@ -60,6 +60,10 @@ class ApiClient {
         credentials: 'include',
       });
 
+      if (response.status === 204) {
+        return {} as ApiResponse<T>;
+      }
+
       const data = await response.json();
 
       if (!response.ok) {
