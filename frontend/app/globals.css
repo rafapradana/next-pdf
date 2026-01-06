@@ -117,13 +117,19 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
 }
+
 
 @utility transform-style-3d {
   transform-style: preserve-3d;

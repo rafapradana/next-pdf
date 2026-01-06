@@ -30,16 +30,16 @@ export function Header() {
       >
         <div className="container mx-auto flex items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 group-hover:bg-primary/20 transition-colors border border-primary/20">
-              <FileText className="h-5 w-5 text-primary transition-transform group-hover:scale-110 duration-300" />
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-red-50 group-hover:bg-red-100 transition-colors border border-red-100">
+              <FileText className="h-5 w-5 text-red-600 transition-transform group-hover:scale-110 duration-300" />
             </div>
-            <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70 group-hover:to-primary transition-all duration-300">
-              NEXT PDF
+            <span className="text-xl font-bold tracking-tight text-foreground transition-all duration-300">
+              NEXT <span className="text-red-600">PDF</span>
             </span>
           </Link>
 
           <nav className="hidden items-center gap-6 md:flex">
-            {["Features", "How it Works", "FAQ"].map((item) => (
+            {["Features", "Testimonials", "FAQ"].map((item) => (
               <Link
                 key={item}
                 href={`#${item.toLowerCase().replace(/\s+/g, '-')}`}
