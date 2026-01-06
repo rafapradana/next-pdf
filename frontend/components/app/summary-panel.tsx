@@ -28,6 +28,12 @@ import {
   Languages,
   Check,
 } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 interface SummaryPanelProps {
   file: FileItem;
@@ -334,59 +340,88 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                   <Skeleton className="h-16 w-full" />
                 </div>
               ) : summaryHistory.length > 0 ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground mb-4">
+                <Accordion type="single" collapsible className="w-full space-y-2">
+                  <p className="text-sm text-muted-foreground mb-4 px-1">
                     {summaryHistory.length} summary version{summaryHistory.length > 1 ? 's' : ''} generated
                   </p>
                   {summaryHistory.map((item) => (
-                    <div
+                    <AccordionItem
                       key={item.id}
-                      className={`p-3 rounded-lg border ${item.is_current
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted/50"
-                        } transition-colors`}
+                      value={item.id}
+                      className={`border rounded-lg px-3 ${item.is_current ? 'bg-primary/5 border-primary/20' : 'hover:bg-muted/40'}`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-sm truncate">
-                              {item.title || `Version ${item.version}`}
-                            </span>
-                            {item.is_current && (
-                              <Badge variant="default" className="gap-1 h-5 text-xs">
-                                <Check className="h-3 w-3" />
-                                Current
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {formatDuration(item.processing_duration_ms)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              {getLanguageFlag(item.language)} {getLanguageName(item.language)}
-                            </span>
-                            <span>
-                              {summaryStyles.find((s) => s.id === item.style)?.name || item.style}
+                      <AccordionTrigger className="hover:no-underline py-3">
+                        <div className="flex flex-1 items-center gap-3 text-left overflow-hidden min-w-0 pr-2">
+                          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm truncate block max-w-full">
+                                {item.title || `Version ${item.version}`}
+                              </span>
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {formatDate(item.created_at)} • v{item.version}
                             </span>
                           </div>
+                          {item.is_current && (
+                            <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20 shrink-0 h-6">
+                              Current
+                            </Badge>
+                          )}
                         </div>
-                        <div className="text-xs text-muted-foreground whitespace-nowrap">
-                          v{item.version}
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-3 pt-1">
+                        <div className="space-y-3 pl-1">
+                          {/* Full Title if truncated */}
+                          {(item.title && item.title.length > 40) && (
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground mb-1">Full Title</p>
+                              <p className="text-sm leading-relaxed">{item.title}</p>
+                            </div>
+                          )}
+
+                          {/* Metadata Grid */}
+                          <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Language</p>
+                              <div className="flex items-center gap-1.5 text-sm">
+                                <span>{getLanguageFlag(item.language)}</span>
+                                <span>{getLanguageName(item.language)}</span>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Duration</p>
+                              <div className="flex items-center gap-1.5 text-sm">
+                                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>{formatDuration(item.processing_duration_ms)}</span>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Style</p>
+                              <div className="flex items-center gap-1.5 text-sm">
+                                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>{summaryStyles.find((s) => s.id === item.style)?.name || item.style}</span>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Model</p>
+                              <div className="flex items-center gap-1.5 text-sm">
+                                <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>{item.model_used || 'Standard'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {item.custom_instructions && (
+                            <div className="bg-muted/50 p-2.5 rounded-md mt-2">
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Instructions:</p>
+                              <p className="text-xs italic opacity-80">{item.custom_instructions}</p>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {formatDate(item.created_at)}
-                      </p>
-                      {item.model_used && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Model: {item.model_used}
-                        </p>
-                      )}
-                    </div>
+                      </AccordionContent>
+                    </AccordionItem>
                   ))}
-                </div>
+                </Accordion>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <History className="h-12 w-12 text-muted-foreground/50 mb-4" />
