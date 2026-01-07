@@ -123,6 +123,11 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	internal := api.Group("/internal")
 	internal.Post("/summaries/callback", internalHandler.SummaryCallback)
 
+	// Guest routes (public - for trying the service without auth)
+	guestHandler := handler.NewGuestHandler()
+	guest := api.Group("/guest")
+	guest.Post("/summarize", guestHandler.Summarize)
+
 	return app
 }
 

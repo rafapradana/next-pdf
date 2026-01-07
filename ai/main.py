@@ -10,7 +10,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from minio import Minio
@@ -65,6 +65,16 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: str
     version: str = "1.0.0"
+
+
+class GuestSummaryResponse(BaseModel):
+    """Response model for guest synchronous summarization"""
+    title: str
+    content: str
+    style: str
+    language: str
+    processing_duration_ms: int
+    model_used: str = "gemini-2.5-flash"
 
 
 # Initialize services
@@ -125,6 +135,83 @@ async def health_check():
 async def get_styles():
     """Get available summary styles"""
     return {"data": Summarizer.get_available_styles()}
+
+
+@app.post("/summarize-sync", response_model=GuestSummaryResponse)
+async def summarize_sync(
+    file: UploadFile = File(..., description="PDF file to summarize"),
+    style: str = Form(default="bullet_points", description="Summary style"),
+    language: str = Form(default="en", description="Summary language: 'en' or 'id'"),
+    custom_instructions: Optional[str] = Form(default=None, max_length=500)
+):
+    """
+    Synchronous PDF summarization for guest users.
+    
+    Receives PDF directly as multipart upload, processes immediately,
+    and returns the summary in the response. No storage involved.
+    """
+    start_time = time.time()
+    
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    
+    if file.content_type and file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Invalid file type. Must be PDF")
+    
+    # Validate style
+    valid_styles = ["bullet_points", "paragraph", "detailed", "executive", "academic"]
+    if style not in valid_styles:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid style. Must be one of: {', '.join(valid_styles)}"
+        )
+    
+    # Validate language
+    if language not in ["en", "id"]:
+        raise HTTPException(status_code=400, detail="Language must be 'en' or 'id'")
+    
+    try:
+        # Read PDF bytes directly from upload
+        pdf_bytes = await file.read()
+        
+        # Check file size (10MB limit for guests)
+        if len(pdf_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+        
+        logger.info(f"Guest summarization: {len(pdf_bytes)} bytes, style={style}, lang={language}")
+        
+        # Extract text from PDF
+        text = pdf_extractor.extract_text(pdf_bytes)
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="No text could be extracted from the PDF")
+        
+        logger.info(f"Extracted text: {len(text)} characters")
+        
+        # Generate summary
+        title, content, prompt_tokens, completion_tokens = summarizer.generate_summary(
+            text=text,
+            style=style,
+            custom_instructions=custom_instructions,
+            language=language
+        )
+        
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"Guest summary generated in {processing_time_ms}ms")
+        
+        return GuestSummaryResponse(
+            title=title,
+            content=content,
+            style=style,
+            language=language,
+            processing_duration_ms=processing_time_ms
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Guest summarization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
 
 @app.post("/summarize", response_model=SummarizeResponse)

@@ -48,6 +48,12 @@ export function Header() {
                 {item}
               </Link>
             ))}
+            <Link
+              href="/try"
+              className="text-sm font-semibold text-red-600 hover:text-red-700 transition-colors hover:scale-105 duration-200 flex items-center gap-1"
+            >
+              Try Free
+            </Link>
           </nav>
 
           <div className="hidden items-center gap-3 md:flex">
@@ -80,6 +86,9 @@ export function Header() {
               </Link>
             ))}
             <div className="flex flex-col gap-3 mt-8">
+              <Button variant="outline" size="lg" className="rounded-full w-full py-6 text-lg border-red-200 text-red-600" asChild>
+                <Link href="/try">✨ Try Free</Link>
+              </Button>
               <Button variant="outline" size="lg" className="rounded-full w-full py-6 text-lg" asChild>
                 <Link href="/login">Log in</Link>
               </Button>
