@@ -13,8 +13,9 @@ import httpx
 import traceback
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+import json
 from pydantic import BaseModel, Field
 from minio import Minio
 
@@ -219,6 +220,10 @@ async def summarize_sync(
         # Check file size (10MB limit for guests)
         if len(pdf_bytes) > 10 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+            
+        # Strict Validation
+        if not await summarizer.validate_pdf(pdf_bytes):
+            raise HTTPException(status_code=400, detail="Invalid PDF file. Header check failed.")
         
         logger.info(f"Guest summarization: {len(pdf_bytes)} bytes, style={style}, lang={language}")
         
@@ -253,6 +258,71 @@ async def summarize_sync(
     except Exception as e:
         logger.error(f"Guest summarization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
+
+
+    except Exception as e:
+        logger.error(f"Guest summarization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
+
+
+@app.post("/summarize-stream")
+async def summarize_stream(
+    file: UploadFile = File(..., description="PDF file to summarize"),
+    style: str = Form(default="bullet_points", description="Summary style"),
+    language: str = Form(default="en", description="Summary language: 'en' or 'id'"),
+    custom_instructions: Optional[str] = Form(default=None, max_length=500)
+):
+    """
+    Streamed PDF summarization for guest users (SSE).
+    """
+    # 1. Read file
+    try:
+        pdf_bytes = await file.read()
+    except Exception as e:
+        logger.error(f"Failed to read upload: {e}")
+        raise HTTPException(status_code=400, detail="Failed to read file")
+
+    # 2. Strict Validation
+    if not await summarizer.validate_pdf(pdf_bytes):
+        raise HTTPException(status_code=400, detail="Invalid PDF file. Header check failed.")
+    
+    # 3. Size Validation (10MB)
+    if len(pdf_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+
+    # Generator for SSE
+    async def event_generator():
+        try:
+            # 4. Extract Text
+            yield f"data: {json.dumps({'log': 'Validating PDF structure...'})}\n\n"
+            await asyncio.sleep(0.1) # UI visual
+
+            yield f"data: {json.dumps({'log': 'Extracting text from PDF...'})}\n\n"
+            try:
+                text = pdf_extractor.extract_text(pdf_bytes)
+                if not text.strip():
+                     yield f"data: {json.dumps({'error': 'No text could be extracted from this PDF.'})}\n\n"
+                     return
+            except Exception as e:
+                 logger.error(f"Extraction failed: {e}")
+                 yield f"data: {json.dumps({'error': f'Text extraction failed: {str(e)}'})}\n\n"
+                 return
+
+            # 5. Run Recursive Summarization
+            async for event in summarizer.generate_summary_stream(
+                text=text,
+                style=style,
+                custom_instructions=custom_instructions,
+                language=language
+            ):
+                # event is a dict like {'log': 'MSG'} or {'result': {...}} or {'error': 'MSG'}
+                yield f"data: {json.dumps(event)}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Stream handler error: {e}")
+            yield f"data: {json.dumps({'error': f'Internal server error: {str(e)}'})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/summarize", response_model=SummarizeResponse)
@@ -317,6 +387,10 @@ async def process_summary(
         
         logger.info(f"Downloaded PDF: {len(pdf_bytes)} bytes")
         
+        # Strict Validation
+        if not await summarizer.validate_pdf(pdf_bytes):
+            raise ValueError("Invalid PDF file. Header check failed.")
+
         # Extract text from PDF
         text = pdf_extractor.extract_text(pdf_bytes)
         if not text.strip():

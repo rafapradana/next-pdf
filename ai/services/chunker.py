@@ -31,57 +31,111 @@ class TextChunker:
         self.overlap_size = overlap_size
         self.separator = separator
     
-    def chunk_text(self, text: str) -> List[str]:
+    async def chunk_text(self, text: str) -> List[str]:
         """
-        Split text into chunks suitable for LLM processing
-        
-        Args:
-            text: The full text to chunk
-            
-        Returns:
-            List of text chunks
+        Split text into chunks suitable for LLM processing.
+        Priority:
+        1. Markdown Headers (#, ##)
+        2. Paragraphs (\n\n)
+        3. Sentences (. )
+        4. Character limit (hard cut)
         """
         if not text or len(text) <= self.max_chunk_size:
             return [text] if text else []
         
         chunks = []
         
-        # Try to split by paragraphs first
-        paragraphs = self._split_by_separator(text, self.separator)
+        # 1. Try splitting by Markdown Headers first (Smart Chunking)
+        header_sections = self._split_by_headers(text)
         
         current_chunk = ""
-        for para in paragraphs:
-            # If single paragraph is too large, split it further
-            if len(para) > self.max_chunk_size:
-                # Save current chunk if exists
+        for section in header_sections:
+            # If section itself is too large, fall back to paragraph splitting
+            if len(section) > self.max_chunk_size:
                 if current_chunk:
                     chunks.append(current_chunk.strip())
                     current_chunk = ""
                 
-                # Split large paragraph by sentences
-                sub_chunks = self._split_large_paragraph(para)
+                # Recursive paragraph splitting
+                sub_chunks = self._split_by_paragraphs(section)
                 chunks.extend(sub_chunks)
                 continue
-            
-            # Check if adding this paragraph exceeds limit
-            test_chunk = current_chunk + self.separator + para if current_chunk else para
+
+            # Check if adding this section exceeds limit
+            test_chunk = current_chunk + "\n\n" + section if current_chunk else section
             
             if len(test_chunk) <= self.max_chunk_size:
                 current_chunk = test_chunk
             else:
-                # Save current chunk and start new one
                 if current_chunk:
                     chunks.append(current_chunk.strip())
                 
-                # Start new chunk with overlap from previous
+                # Start new chunk with overlap
                 overlap = self._get_overlap(current_chunk)
-                current_chunk = overlap + para if overlap else para
+                current_chunk = overlap + section if overlap else section
         
-        # Don't forget the last chunk
         if current_chunk:
             chunks.append(current_chunk.strip())
+            
+        logger.info(f"Split text into {len(chunks)} chunks (Smart Mode)")
+        return chunks
+
+    def _split_by_headers(self, text: str) -> List[str]:
+        """Split text by markdown headers (#, ##), keeping headers with content"""
+        # Regex to find headers at start of line
+        # capturing group 1: header markers (# to ######)
+        # capturing group 2: rest of the title
+        pattern = r'(^#{1,6}\s+.+$)'
         
-        logger.info(f"Split text into {len(chunks)} chunks")
+        parts = re.split(pattern, text, flags=re.MULTILINE)
+        sections = []
+        current_section = ""
+        
+        for part in parts:
+            if not part.strip():
+                continue
+                
+            # Check if part is a header
+            if re.match(r'^#{1,6}\s+', part):
+                # If we have a current section, save it
+                if current_section:
+                    sections.append(current_section)
+                current_section = part # Start new section with header
+            else:
+                current_section += part
+                
+        if current_section:
+            sections.append(current_section)
+            
+        return sections if sections else [text]
+
+    def _split_by_paragraphs(self, text: str) -> List[str]:
+        """Legacy paragraph splitting logic (refactored for clarity)"""
+        chunks = []
+        paragraphs = self._split_by_separator(text, self.separator)
+        
+        current_chunk = ""
+        for para in paragraphs:
+            if len(para) > self.max_chunk_size:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = ""
+                sub_chunks = self._split_large_paragraph(para)
+                chunks.extend(sub_chunks)
+                continue
+            
+            test_chunk = current_chunk + self.separator + para if current_chunk else para
+            if len(test_chunk) <= self.max_chunk_size:
+                current_chunk = test_chunk
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                overlap = self._get_overlap(current_chunk)
+                current_chunk = overlap + para if overlap else para
+                
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+            
         return chunks
     
     def _split_by_separator(self, text: str, separator: str) -> List[str]:

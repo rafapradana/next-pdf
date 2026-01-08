@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -307,6 +308,51 @@ func (s *FileService) GetDownloadURL(ctx context.Context, userID, fileID uuid.UU
 	}
 
 	return url.String(), file.OriginalFilename, nil
+}
+
+func (s *FileService) GetFileContent(ctx context.Context, userID, fileID uuid.UUID) (io.ReadCloser, *models.File, error) {
+	file, err := s.fileRepo.GetByID(ctx, fileID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if file.UserID != userID {
+		return nil, nil, repository.ErrFileNotFound
+	}
+
+	content, err := s.storage.GetObject(ctx, s.storage.BucketFiles(), file.StoragePath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return content, file, nil
+}
+
+func (s *FileService) SaveStreamSummary(ctx context.Context, userID, fileID uuid.UUID, req models.SummaryCallbackRequest) error {
+	// 1. Verify file exists and belongs to user
+	file, err := s.fileRepo.GetByID(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if file.UserID != userID {
+		return repository.ErrFileNotFound
+	}
+
+	// 2. Create summary
+	summary := &repository.SummaryCreate{
+		FileID:               fileID,
+		Title:                &req.Title,
+		Content:              req.Content,
+		Style:                req.Style,
+		CustomInstructions:   req.CustomInstructions,
+		ModelUsed:            &req.ModelUsed,
+		PromptTokens:         &req.PromptTokens,
+		CompletionTokens:     &req.CompletionTokens,
+		ProcessingDurationMs: &req.ProcessingDurationMs,
+		Language:             req.Language,
+	}
+
+	return s.summaryRepo.Create(ctx, summary)
 }
 
 func generateSafeFilename(filename string) string {

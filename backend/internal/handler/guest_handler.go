@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -135,6 +136,93 @@ func (h *GuestHandler) Summarize(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(models.NewAPIResponse(summary, "Summary generated successfully"))
+}
+
+// SummarizeStream handles guest PDF summarization with streaming response (SSE)
+// POST /api/v1/guest/summarize-stream
+func (h *GuestHandler) SummarizeStream(c *fiber.Ctx) error {
+	// Get uploaded file
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("VALIDATION_ERROR", "PDF file is required"))
+	}
+
+	// Validate file type
+	if !strings.HasSuffix(strings.ToLower(fileHeader.Filename), ".pdf") {
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("VALIDATION_ERROR", "Only PDF files are allowed"))
+	}
+
+	// Validate file size (10MB limit)
+	if fileHeader.Size > 10*1024*1024 {
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("VALIDATION_ERROR", "File size exceeds 10MB limit"))
+	}
+
+	// Get form fields
+	style := c.FormValue("style", "bullet_points")
+	language := c.FormValue("language", "en")
+	customInstructions := c.FormValue("custom_instructions", "")
+
+	// Open uploaded file
+	file, err := fileHeader.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse("INTERNAL_ERROR", "Failed to read uploaded file"))
+	}
+	defer file.Close()
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse("INTERNAL_ERROR", "Failed to read file content"))
+	}
+
+	// Prepare request to AI Service
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	// Add file part
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, fileHeader.Filename))
+	header.Set("Content-Type", "application/pdf")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse("INTERNAL_ERROR", "Failed to create request"))
+	}
+	part.Write(fileBytes)
+
+	// Add fields
+	writer.WriteField("style", style)
+	writer.WriteField("language", language)
+	if customInstructions != "" {
+		writer.WriteField("custom_instructions", customInstructions)
+	}
+	writer.Close()
+
+	// Create HTTP Request
+	req, err := http.NewRequest("POST", h.aiServiceURL+"/summarize-stream", &buf)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse("INTERNAL_ERROR", "Failed to create request"))
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Execute Request (do not read body yet)
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(models.NewErrorResponse("AI_SERVICE_ERROR", "Failed to connect to AI service"))
+	}
+
+	// Set headers for SSE
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("Transfer-Encoding", "chunked")
+
+	// Stream response body
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		defer resp.Body.Close()
+		io.Copy(w, resp.Body)
+		w.Flush()
+	})
+
+	return nil
 }
 
 // callAIService sends the PDF to the AI service for summarization

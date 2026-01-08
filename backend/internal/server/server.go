@@ -102,6 +102,7 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	files.Delete("/:id", fileHandler.Delete)
 	files.Post("/upload/presign", fileHandler.Presign)
 	files.Post("/upload/confirm", fileHandler.ConfirmUpload)
+	files.Post("/:id/summarize-stream", fileHandler.SummarizeStream)
 	files.Get("/:id/download", fileHandler.GetDownloadURL)
 
 	// Summary routes (protected)
@@ -127,6 +128,7 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	guestHandler := handler.NewGuestHandler()
 	guest := api.Group("/guest")
 	guest.Post("/summarize", guestHandler.Summarize)
+	guest.Post("/summarize-stream", guestHandler.SummarizeStream)
 
 	return app
 }

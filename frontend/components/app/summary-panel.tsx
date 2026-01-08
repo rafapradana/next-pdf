@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
   Clock,
@@ -27,6 +28,8 @@ import {
   FileText,
   Languages,
   Check,
+  Terminal,
+  RefreshCw,
 } from "lucide-react";
 import {
   Accordion,
@@ -34,6 +37,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 interface SummaryPanelProps {
   file: FileItem;
@@ -51,17 +62,22 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     summaryStyles,
     isLoadingSummary,
     isLoadingHistory,
-    isGeneratingSummary,
     loadSummary,
     loadSummaryHistory,
     loadSummaryStyles,
-    generateSummary,
   } = useFiles();
 
   const [selectedStyle, setSelectedStyle] = useState("bullet_points");
   const [selectedLanguage, setSelectedLanguage] = useState("en");
   const [customInstructions, setCustomInstructions] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Streaming State
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamLogs, setStreamLogs] = useState<string[]>([]);
+  const [streamingError, setStreamingError] = useState<string | null>(null);
+
+  // Modal State
+  const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
 
   // Load summary styles on mount
   useEffect(() => {
@@ -73,35 +89,103 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     if (file.id) {
       loadSummary(file.id);
       loadSummaryHistory(file.id);
+      // Reset streaming state on file change
+      setIsStreaming(false);
+      setStreamLogs([]);
+      setStreamingError(null);
     }
   }, [file.id, loadSummary, loadSummaryHistory]);
 
-  const handleGenerate = async () => {
+  const handleGenerateStream = async () => {
     if (!file.id) return;
 
-    setIsGenerating(true);
-    // Switch to summary tab to show progress
+    setIsStreaming(true);
+    setStreamLogs([]);
+    setStreamingError(null);
+    setIsRegenerateOpen(false);
+
+    // Switch to summary tab
     const summaryTab = document.querySelector('[data-state="inactive"][value="summary"]') as HTMLElement;
     summaryTab?.click();
 
-    const result = await generateSummary(
-      file.id,
-      selectedStyle,
-      customInstructions || undefined,
-      selectedLanguage
-    );
+    try {
+      const formData = new FormData();
+      formData.append("style", selectedStyle);
+      formData.append("language", selectedLanguage);
+      if (customInstructions) formData.append("custom_instructions", customInstructions);
 
-    if (result.success) {
-      toast.success("Summary generated successfully");
-    } else {
+      // Use the new endpoint implemented in FileHandler
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/files/${file.id}/summarize-stream`,
+        {
+          method: "POST",
+          headers: {
+            // "Authorization": "Bearer ...", // Handled by cookie/browser usually, or needs explicit header if token-based
+            // NextPDF uses HttpOnly cookies for auth, so credentials: "include" might be needed if cross-origin
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error?.message || "Connection failed");
+      }
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const jsonStr = line.replace("data: ", "");
+              const data = JSON.parse(jsonStr);
+
+              if (data.log) {
+                setStreamLogs(prev => [...prev, data.log]);
+              } else if (data.result) {
+                // Streaming finished successfully
+                // Refresh summary data from backend to get the standard format
+                // The backend implementation of SummarizeStream saves the result to DB.
+                // We add a small delay to ensure DB transaction commits before we fetch
+                await new Promise(r => setTimeout(r, 500));
+                await loadSummary(file.id);
+                await loadSummaryHistory(file.id);
+                setIsStreaming(false);
+                toast.success("Summary generated successfully");
+              } else if (data.error) {
+                throw new Error(data.error);
+              }
+            } catch (e: any) {
+              console.error("Error parsing stream:", e);
+              // Don't error out on incomplete chunks, just ignore
+              // But if it's a real error, handle it
+            }
+          }
+        }
+      }
+
+    } catch (err: any) {
+      console.error("Stream error:", err);
+      setStreamingError(err.message || "Failed to generate summary");
+      setIsStreaming(false);
       toast.error("Failed to generate summary", {
-        description: result.error,
+        description: err.message,
       });
     }
-    setIsGenerating(false);
   };
 
   const formatDuration = (ms: number) => {
+    if (!ms) return "0ms";
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
   };
@@ -125,6 +209,91 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     return LANGUAGES.find(l => l.id === langCode)?.flag || "🌐";
   };
 
+  const SummaryForm = ({ isRegenerate = false }) => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="style">Summary Style</Label>
+        <Select value={selectedStyle} onValueChange={setSelectedStyle}>
+          <SelectTrigger id="style">
+            <SelectValue placeholder="Select a style" />
+          </SelectTrigger>
+          <SelectContent>
+            {summaryStyles.map((style) => (
+              <SelectItem key={style.id} value={style.id}>
+                <div className="flex flex-col">
+                  <span>{style.name}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {summaryStyles.find((s) => s.id === selectedStyle) && (
+          <p className="text-xs text-muted-foreground">
+            {summaryStyles.find((s) => s.id === selectedStyle)?.description}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="language">
+          <Languages className="h-4 w-4 inline mr-1" />
+          Summary Language
+        </Label>
+        <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+          <SelectTrigger id="language">
+            <SelectValue placeholder="Select language" />
+          </SelectTrigger>
+          <SelectContent>
+            {LANGUAGES.map((lang) => (
+              <SelectItem key={lang.id} value={lang.id}>
+                <span className="flex items-center gap-2">
+                  <span>{lang.flag}</span>
+                  <span>{lang.name}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="instructions">
+          Custom Instructions{" "}
+          <span className="text-muted-foreground">(optional)</span>
+        </Label>
+        <Textarea
+          id="instructions"
+          placeholder="e.g., Focus on methodology and key findings."
+          value={customInstructions}
+          onChange={(e) => setCustomInstructions(e.target.value)}
+          maxLength={500}
+          rows={4}
+        />
+        <p className="text-xs text-muted-foreground text-right">
+          {customInstructions.length}/500
+        </p>
+      </div>
+
+      <Button
+        className="w-full"
+        onClick={handleGenerateStream}
+        disabled={isStreaming || file.status === "processing"}
+      >
+        {isStreaming ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Generating...
+          </>
+        ) : (
+          <>
+            <Sparkles className="mr-2 h-4 w-4" />
+            {isRegenerate ? "Regenerate Summary" : "Generate Summary"}
+          </>
+        )}
+      </Button>
+    </div>
+  );
+
   return (
     <div className="flex h-full flex-col">
       <Tabs defaultValue="summary" className="flex h-full flex-col">
@@ -137,17 +306,55 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
         </div>
 
         {/* Summary Tab */}
-        <TabsContent value="summary" className="flex-1 overflow-hidden m-0">
+        <TabsContent value="summary" className="flex-1 overflow-hidden m-0 relative">
           <ScrollArea className="h-full">
             <div className="p-4">
-              {isGeneratingSummary && (
-                <div className="mb-4 flex items-center gap-2 rounded-md bg-blue-500/10 p-3 text-sm text-blue-600 dark:text-blue-400">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Generating new summary... This may take a few moments.</span>
-                </div>
-              )}
+              {/* Error Overlay */}
+              <AnimatePresence>
+                {streamingError && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm p-4">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-white p-6 rounded-2xl shadow-xl border border-red-100 max-w-sm text-center"
+                    >
+                      <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <AlertCircle className="h-6 w-6 text-red-600" />
+                      </div>
+                      <h3 className="font-semibold text-neutral-900 mb-2">Generation Failed</h3>
+                      <p className="text-sm text-neutral-600 mb-4">{streamingError}</p>
+                      <Button onClick={() => { setStreamingError(null); setIsStreaming(false); }} variant="outline">
+                        Dismiss
+                      </Button>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
 
-              {isLoadingSummary ? (
+              {isStreaming ? (
+                <div className="space-y-3 font-mono text-sm">
+                  <div className="flex items-center gap-2 text-neutral-600 border-b pb-2 mb-2">
+                    <Terminal className="h-4 w-4" />
+                    <span className="font-semibold">Processing Log</span>
+                  </div>
+                  {streamLogs.map((log, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex items-start gap-2 text-neutral-600"
+                    >
+                      <span className="text-neutral-300 select-none">›</span>
+                      <span>{log}</span>
+                    </motion.div>
+                  ))}
+                  <motion.div
+                    animate={{ opacity: [0.4, 1, 0.4] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                    className="w-3 h-5 bg-red-500/50 inline-block ml-2 align-middle"
+                  />
+                </div>
+              ) : isLoadingSummary ? (
                 <div className="space-y-4">
                   <Skeleton className="h-6 w-3/4" />
                   <Skeleton className="h-4 w-full" />
@@ -155,11 +362,29 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                   <Skeleton className="h-4 w-2/3" />
                 </div>
               ) : currentSummary ? (
-                <div className="space-y-4">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
                   <div>
-                    <h3 className="font-semibold text-lg leading-tight">
-                      {currentSummary.title}
-                    </h3>
+                    <div className="flex items-start justify-between">
+                      <h3 className="font-semibold text-lg leading-tight">
+                        {currentSummary.title}
+                      </h3>
+                      <Dialog open={isRegenerateOpen} onOpenChange={setIsRegenerateOpen}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm" className="shrink-0 rounded-full h-8">
+                            <RefreshCw className="h-3 w-3 mr-2" /> Regenerate
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Regenerate Summary</DialogTitle>
+                            <DialogDescription>
+                              Choose new settings for your summary.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <SummaryForm isRegenerate />
+                        </DialogContent>
+                      </Dialog>
+                    </div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Badge variant="secondary">
                         {summaryStyles.find((s) => s.id === currentSummary.style)
@@ -167,7 +392,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                       </Badge>
                       <Badge variant="outline" className="gap-1">
                         <Clock className="h-3 w-3" />
-                        {formatDuration(currentSummary.processing_duration_ms)}
+                        {formatDuration(currentSummary.processing_duration_ms || 0)}
                       </Badge>
                       <Badge variant="outline" className="gap-1">
                         <History className="h-3 w-3" />v{currentSummary.version}
@@ -195,7 +420,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                       }}
                     />
                   </div>
-                </div>
+                </motion.div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <FileText className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -225,106 +450,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
         <TabsContent value="generate" className="flex-1 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="style">Summary Style</Label>
-                <Select value={selectedStyle} onValueChange={setSelectedStyle}>
-                  <SelectTrigger id="style">
-                    <SelectValue placeholder="Select a style" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {summaryStyles.map((style) => (
-                      <SelectItem key={style.id} value={style.id}>
-                        <div className="flex flex-col">
-                          <span>{style.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {summaryStyles.find((s) => s.id === selectedStyle) && (
-                  <p className="text-xs text-muted-foreground">
-                    {summaryStyles.find((s) => s.id === selectedStyle)?.description}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="language">
-                  <Languages className="h-4 w-4 inline mr-1" />
-                  Summary Language
-                </Label>
-                <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
-                  <SelectTrigger id="language">
-                    <SelectValue placeholder="Select language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LANGUAGES.map((lang) => (
-                      <SelectItem key={lang.id} value={lang.id}>
-                        <span className="flex items-center gap-2">
-                          <span>{lang.flag}</span>
-                          <span>{lang.name}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="instructions">
-                  Custom Instructions{" "}
-                  <span className="text-muted-foreground">(optional)</span>
-                </Label>
-                <Textarea
-                  id="instructions"
-                  placeholder="e.g., Focus on methodology and key findings."
-                  value={customInstructions}
-                  onChange={(e) => setCustomInstructions(e.target.value)}
-                  maxLength={500}
-                  rows={4}
-                />
-                <p className="text-xs text-muted-foreground text-right">
-                  {customInstructions.length}/500
-                </p>
-              </div>
-
-              {file.status === "processing" && (
-                <div className="flex items-center gap-2 rounded-md bg-yellow-500/10 p-3 text-sm text-yellow-600 dark:text-yellow-400">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>A summary is currently being generated...</span>
-                </div>
-              )}
-
-              {file.status === "failed" && (
-                <div className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <span>Previous summary generation failed. Try again.</span>
-                </div>
-              )}
-
-              <Button
-                className="w-full"
-                onClick={handleGenerate}
-                disabled={isGenerating || file.status === "processing"}
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Starting...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Generate Summary
-                  </>
-                )}
-              </Button>
-
-              {currentSummary && (
-                <p className="text-xs text-muted-foreground text-center">
-                  This will create a new version of the summary.
-                </p>
-              )}
+              <SummaryForm />
             </div>
           </ScrollArea>
         </TabsContent>
@@ -371,7 +497,6 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                       </AccordionTrigger>
                       <AccordionContent className="pb-3 pt-1">
                         <div className="space-y-3 pl-1">
-                          {/* Full Title if truncated */}
                           {(item.title && item.title.length > 40) && (
                             <div>
                               <p className="text-xs font-semibold text-muted-foreground mb-1">Full Title</p>
@@ -379,7 +504,6 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                             </div>
                           )}
 
-                          {/* Metadata Grid */}
                           <div className="grid grid-cols-2 gap-y-3 gap-x-4">
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">Language</p>
@@ -392,7 +516,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                               <p className="text-xs text-muted-foreground mb-1">Duration</p>
                               <div className="flex items-center gap-1.5 text-sm">
                                 <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span>{formatDuration(item.processing_duration_ms)}</span>
+                                <span>{formatDuration(item.processing_duration_ms || 0)}</span>
                               </div>
                             </div>
                             <div>
