@@ -149,8 +149,9 @@ export default function TryPage() {
             formData.append("language", language);
             if (customInstructions) formData.append("custom_instructions", customInstructions);
 
+            const baseUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
             const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/guest/summarize-stream`,
+                `${baseUrl}/guest/summarize-stream`,
                 {
                     method: "POST",
                     body: formData,

@@ -115,8 +115,9 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
       if (customInstructions) formData.append("custom_instructions", customInstructions);
 
       // Use the new endpoint implemented in FileHandler
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/files/${file.id}/summarize-stream`,
+        `${baseUrl}/files/${file.id}/summarize-stream`,
         {
           method: "POST",
           headers: {

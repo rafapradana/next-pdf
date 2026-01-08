@@ -176,14 +176,18 @@ class Summarizer:
             yield {"log": f"Analyzing document connection ({len(text)} chars)..."}
             
             # recursive function
-            async def process_text(current_text: str, depth: int = 1) -> str:
+            async def process_text(current_text: str, depth: int = 1):
                 if depth > MAX_RECURSIVE_DEPTH:
                     yield {"log": f"Max recursive depth reached at level {depth}. Summarizing directly."}
-                    return await self._summarize_single_async(current_text, style, custom_instructions, language, total_tokens)
+                    res = await self._summarize_single_async(current_text, style, custom_instructions, language, total_tokens)
+                    yield {"final_text": res}
+                    return
 
                 if len(current_text) <= MAX_SINGLE_CHUNK_SIZE:
                     yield {"log": "Processing single chunk..."}
-                    return await self._summarize_single_async(current_text, style, custom_instructions, language, total_tokens)
+                    res = await self._summarize_single_async(current_text, style, custom_instructions, language, total_tokens)
+                    yield {"final_text": res}
+                    return
                 
                 # Chunking
                 yield {"log": f"Chunking text (Level {depth})..."}
@@ -202,8 +206,7 @@ class Summarizer:
                     )
                     tasks.append(task)
                 
-                # Gather results (fail fast handled by individual exceptions usually, but gather accepts exceptions)
-                # We want fail-fast: if one fails, we stop.
+                # Gather results
                 try:
                     chunk_summaries = await asyncio.gather(*tasks)
                     yield {"log": f"All {len(chunks)} chunks processed successfully."}
@@ -218,13 +221,21 @@ class Summarizer:
                 # Check if merged text is still too large (Recursive step)
                 if len(merged_text) > MAX_SINGLE_CHUNK_SIZE:
                     yield {"log": f"Merged summary is still large ({len(merged_text)} chars). Recursively summarizing (Level {depth+1})..."}
-                    return await process_text(merged_text, depth + 1)
+                    async for event in process_text(merged_text, depth + 1):
+                        yield event
+                    return
                 
                 # Final polish of merged text
                 yield {"log": "Finalizing merged summary..."}
-                return await self._merge_chunk_summaries_async(chunk_summaries, style, language, total_tokens)
+                res = await self._merge_chunk_summaries_async(chunk_summaries, style, language, total_tokens)
+                yield {"final_text": res}
 
-            final_summary = await process_text(text)
+            final_summary = ""
+            async for event in process_text(text):
+                if "final_text" in event:
+                    final_summary = event["final_text"]
+                else:
+                    yield event
             
             # Extract title from final summary or generate one
             title = "Document Summary"
