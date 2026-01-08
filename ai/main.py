@@ -1,6 +1,6 @@
 """
 NEXT PDF AI Service
-FastAPI application for PDF summarization using Google Gemini
+FastAPI application for PDF summarization using Google GenAI SDK
 """
 
 import logging
@@ -10,6 +10,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 import httpx
+import asyncio
 import traceback
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -56,7 +57,7 @@ class SummaryResult(BaseModel):
     content: str
     style: str
     custom_instructions: Optional[str]
-    model_used: str = "gemini-2.5-flash"
+    model_used: str = "gemini-2.0-flash-exp"
     prompt_tokens: int
     completion_tokens: int
     processing_duration_ms: int
@@ -79,7 +80,7 @@ class GuestSummaryResponse(BaseModel):
     style: str
     language: str
     processing_duration_ms: int
-    model_used: str = "gemini-2.5-flash"
+    model_used: str = "gemini-2.0-flash-exp"
 
 
 # Initialize services
@@ -255,11 +256,6 @@ async def summarize_sync(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Guest summarization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
-
-
     except Exception as e:
         logger.error(f"Guest summarization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")

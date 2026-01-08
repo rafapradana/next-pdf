@@ -151,7 +151,7 @@ export default function TryPage() {
 
             const baseUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
             const response = await fetch(
-                `${baseUrl}/guest/summarize-stream`,
+                `${baseUrl}/api/v1/guest/summarize-stream`,
                 {
                     method: "POST",
                     body: formData,
