@@ -718,8 +718,11 @@ export function FileBrowser() {
                             <DropdownMenuItem onClick={(e) => openRename(e, file)}>
                               <Pencil className="mr-2 h-4 w-4" /> Rename
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleExport(file.id)}>
+                            <DropdownMenuItem onClick={() => handleExport('csv', file.id)}>
                               <Download className="mr-2 h-4 w-4" /> Export CSV
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport('json', file.id)}>
+                              <FileText className="mr-2 h-4 w-4" /> Export JSON
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={(e) => openDelete(e, file)} className="text-red-600 focus:text-red-600 focus:bg-red-50">
