@@ -35,6 +35,19 @@ Next PDF is a modern, full-stack application designed to manage, organize, and a
 
 ---
 
+## 📸 Screenshots
+
+### Dashboard & File Browser
+![File Browser](/frontend/public/images/readme/file-browser.png)
+
+### Document Analysis
+![Document Analysis](/frontend/public/images/readme/file-page.png)
+
+### Secure Authentication
+![Signup Page](/frontend/public/images/readme/signup-page.png)
+
+---
+
 ## Tech Stack
 
 ### Frontend
