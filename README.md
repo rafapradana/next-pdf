@@ -4,7 +4,7 @@
 
 Next PDF is a modern, full-stack application designed to manage, organize, and analyze PDF documents using advanced AI. It features a robust workspace system for team collaboration, nested folder structures, and powerful AI summarization capabilities using Google's Gemini models.
 
-![Hero Sections](/frontend/public/images/readme/hero-sections.png)
+![Hero Sections](/frontend/public/images/readme/hero-section.png)
 
 ## Key Features
 
