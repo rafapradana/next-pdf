@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useFiles } from "@/lib/file-context";
-import { FileItem } from "@/lib/api";
+import { FileItem, api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -126,11 +126,17 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
       if (customInstructions) formData.append("custom_instructions", customInstructions);
 
       const baseUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+      const token = api.getAccessToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch(
         `${baseUrl}/api/v1/files/${file.id}/summarize-stream`,
         {
           method: "POST",
-          headers: {},
+          headers,
           body: formData,
         }
       );
