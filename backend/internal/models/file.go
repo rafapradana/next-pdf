@@ -19,6 +19,7 @@ const (
 type File struct {
 	ID               uuid.UUID        `json:"id"`
 	UserID           uuid.UUID        `json:"user_id"`
+	WorkspaceID      *uuid.UUID       `json:"workspace_id"`
 	FolderID         *uuid.UUID       `json:"folder_id"`
 	Filename         string           `json:"filename"`
 	OriginalFilename string           `json:"original_filename"`
@@ -87,6 +88,7 @@ type MoveFileRequest struct {
 type PendingUpload struct {
 	ID          uuid.UUID  `json:"id"`
 	UserID      uuid.UUID  `json:"user_id"`
+	WorkspaceID *uuid.UUID `json:"workspace_id"`
 	FolderID    *uuid.UUID `json:"folder_id"`
 	Filename    string     `json:"filename"`
 	FileSize    int64      `json:"file_size"`
@@ -101,6 +103,7 @@ type PresignRequest struct {
 	FileSize    int64      `json:"file_size" validate:"required,gt=0"`
 	ContentType string     `json:"content_type" validate:"required"`
 	FolderID    *uuid.UUID `json:"folder_id"`
+	WorkspaceID *uuid.UUID `json:"workspace_id"`
 }
 
 type PresignResponse struct {

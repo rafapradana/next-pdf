@@ -61,6 +61,7 @@ import {
 import { FolderTreeItem, FileItem } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { WorkspaceSwitcher } from "./workspace/workspace-switcher";
 
 type DragItem = { type: "folder"; data: FolderTreeItem } | { type: "file"; data: FileItem };
 
@@ -303,21 +304,7 @@ export function AppSidebar() {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <Sidebar variant="inset">
           <SidebarHeader>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton size="lg" asChild>
-                  <a href="/app">
-                    <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                      <FileText className="size-4" />
-                    </div>
-                    <div className="flex flex-col gap-0.5 leading-none">
-                      <span className="font-semibold">NEXT PDF</span>
-                      <span className="text-xs text-muted-foreground">AI Document Platform</span>
-                    </div>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
+            <WorkspaceSwitcher />
           </SidebarHeader>
 
           <SidebarContent>
@@ -391,7 +378,7 @@ export function AppSidebar() {
         <DragOverlay>
           {activeItem && (
             <div className="flex items-center gap-2 rounded-md bg-background px-3 py-2 shadow-lg border">
-              {activeItem.type === "folder" ? <><Folder className="h-4 w-4 text-amber-500" /><span>{activeItem.data.name}</span></> 
+              {activeItem.type === "folder" ? <><Folder className="h-4 w-4 text-amber-500" /><span>{activeItem.data.name}</span></>
                 : <><FileText className="h-4 w-4 text-blue-500" /><span>{activeItem.data.original_filename}</span></>}
             </div>
           )}

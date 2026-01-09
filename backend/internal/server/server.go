@@ -40,10 +40,13 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	fileRepo := repository.NewFileRepository(db.Pool)
 	pendingUploadRepo := repository.NewPendingUploadRepository(db.Pool)
 	summaryRepo := repository.NewSummaryRepository(db.Pool)
+
 	jobRepo := repository.NewProcessingJobRepository(db.Pool)
+	workspaceRepo := repository.NewWorkspaceRepository(db.Pool)
 
 	// Initialize services
-	authService := service.NewAuthService(userRepo, tokenRepo, sessionRepo, cfg.JWT)
+	workspaceService := service.NewWorkspaceService(workspaceRepo)
+	authService := service.NewAuthService(userRepo, tokenRepo, sessionRepo, workspaceService, cfg.JWT)
 	userService := service.NewUserService(userRepo, sessionRepo)
 	folderService := service.NewFolderService(folderRepo, fileRepo, store)
 	fileService := service.NewFileService(fileRepo, folderRepo, pendingUploadRepo, summaryRepo, store, cfg.Upload)
@@ -54,10 +57,11 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(userService)
-	folderHandler := handler.NewFolderHandler(folderService)
-	fileHandler := handler.NewFileHandler(fileService)
+	folderHandler := handler.NewFolderHandler(folderService, workspaceService)
+	fileHandler := handler.NewFileHandler(fileService, workspaceService)
 	summaryHandler := handler.NewSummaryHandler(summaryService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
+	workspaceHandler := handler.NewWorkspaceHandler(workspaceService)
 
 	// Auth middleware
 	authMiddleware := middleware.AuthMiddleware(authService)
@@ -80,6 +84,14 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	auth.Get("/sessions", authMiddleware, userHandler.GetSessions)
 	auth.Delete("/sessions/:session_id", authMiddleware, userHandler.RevokeSession)
 
+	// Workspace routes (protected)
+	workspaces := api.Group("/workspaces", authMiddleware)
+	workspaces.Post("/", workspaceHandler.Create)
+	workspaces.Post("/join", workspaceHandler.Join)
+	workspaces.Get("/", workspaceHandler.List)
+	workspaces.Get("/:id/members", workspaceHandler.GetMembers)
+	workspaces.Patch("/:id", workspaceHandler.Update)
+
 	// User routes (protected)
 	api.Get("/me", authMiddleware, userHandler.GetMe)
 	api.Patch("/me", authMiddleware, userHandler.UpdateMe)
@@ -95,6 +107,7 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 
 	// File routes (protected)
 	files := api.Group("/files", authMiddleware)
+	files.Get("/export", fileHandler.Export)
 	files.Get("/", fileHandler.List)
 	files.Get("/:id", fileHandler.GetByID)
 	files.Patch("/:id/move", fileHandler.Move)

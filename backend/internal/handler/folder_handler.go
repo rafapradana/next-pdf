@@ -12,11 +12,12 @@ import (
 )
 
 type FolderHandler struct {
-	folderService *service.FolderService
+	folderService    *service.FolderService
+	workspaceService *service.WorkspaceService
 }
 
-func NewFolderHandler(folderService *service.FolderService) *FolderHandler {
-	return &FolderHandler{folderService: folderService}
+func NewFolderHandler(folderService *service.FolderService, workspaceService *service.WorkspaceService) *FolderHandler {
+	return &FolderHandler{folderService: folderService, workspaceService: workspaceService}
 }
 
 func (h *FolderHandler) GetTree(c *fiber.Ctx) error {
@@ -25,7 +26,33 @@ func (h *FolderHandler) GetTree(c *fiber.Ctx) error {
 	includeFiles := c.QueryBool("include_files", false)
 	includeCounts := c.QueryBool("include_counts", true)
 
-	tree, err := h.folderService.GetTree(c.Context(), userID, includeFiles, includeCounts)
+	// Check if workspace_id is provided
+	var tree []*models.FolderTreeNode
+	var err error
+
+	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
+		workspaceID, parseErr := uuid.Parse(workspaceIDStr)
+		if parseErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse(
+				"VALIDATION_ERROR",
+				"Invalid workspace ID",
+			))
+		}
+
+		// Verify access
+		_, err = h.workspaceService.VerifyMemberAccess(c.Context(), workspaceID, userID)
+		if err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(models.NewErrorResponse(
+				"FORBIDDEN",
+				"You do not have access to this workspace",
+			))
+		}
+
+		tree, err = h.folderService.GetTreeByWorkspaceID(c.Context(), workspaceID, includeFiles, includeCounts)
+	} else {
+		tree, err = h.folderService.GetTree(c.Context(), userID, includeFiles, includeCounts)
+	}
+
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse(
 			"INTERNAL_ERROR",

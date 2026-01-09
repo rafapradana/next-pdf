@@ -312,7 +312,87 @@ CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
 CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC);
 
 -- ============================================================================
--- 11. FUNCTIONS & TRIGGERS
+-- 11. WORKSPACES TABLE
+-- Stores workspace information for team collaboration
+-- BCNF: id → all other attributes
+-- ============================================================================
+CREATE TABLE workspaces (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    invite_code VARCHAR(20) UNIQUE NOT NULL,
+    owner_id UUID NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- Foreign Keys
+    CONSTRAINT fk_workspaces_owner 
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Indexes for workspace queries
+CREATE INDEX idx_workspaces_owner_id ON workspaces(owner_id);
+CREATE INDEX idx_workspaces_invite_code ON workspaces(invite_code);
+
+-- ============================================================================
+-- 12. WORKSPACE MEMBERS TABLE
+-- Stores user membership in workspaces
+-- BCNF: (workspace_id, user_id) → role
+-- ============================================================================
+CREATE TABLE workspace_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workspace_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    role VARCHAR(20) DEFAULT 'member', -- 'owner', 'admin', 'member'
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- Foreign Keys
+    CONSTRAINT fk_workspace_members_workspace 
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+    CONSTRAINT fk_workspace_members_user 
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        
+    -- Constraints
+    UNIQUE(workspace_id, user_id)
+);
+
+CREATE INDEX idx_workspace_members_workspace ON workspace_members(workspace_id);
+CREATE INDEX idx_workspace_members_user ON workspace_members(user_id);
+
+-- ============================================================================
+-- Modification to Existing Tables
+-- Adding workspace_id to folders and files
+-- ============================================================================
+
+-- Add workspace_id to folders
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS workspace_id UUID;
+-- Note: Constraint added if not exists is tricky in pure SQL script without blocks, 
+-- but in schema definition we usually define full table. 
+-- For this append approach, we add them:
+DO $$
+BEGIN
+    BEGIN
+        ALTER TABLE folders ADD CONSTRAINT fk_folders_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+    EXCEPTION
+        WHEN duplicate_object THEN NULL;
+    END;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_folders_workspace_id ON folders(workspace_id);
+
+-- Add workspace_id to files
+ALTER TABLE files ADD COLUMN IF NOT EXISTS workspace_id UUID;
+DO $$
+BEGIN
+    BEGIN
+        ALTER TABLE files ADD CONSTRAINT fk_files_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+    EXCEPTION
+        WHEN duplicate_object THEN NULL;
+    END;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_files_workspace_id ON files(workspace_id);
+
+
+-- ============================================================================
+-- 13. FUNCTIONS & TRIGGERS
 -- ============================================================================
 
 -- Function to update updated_at timestamp automatically
@@ -511,6 +591,7 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE pending_uploads (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL,
+    workspace_id UUID,
     folder_id UUID,
     filename VARCHAR(255) NOT NULL,
     file_size BIGINT NOT NULL,
@@ -523,7 +604,9 @@ CREATE TABLE pending_uploads (
     CONSTRAINT fk_pending_uploads_user 
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_pending_uploads_folder 
-        FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
+        FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
+    CONSTRAINT fk_pending_uploads_workspace
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
 );
 
 -- Indexes for pending uploads

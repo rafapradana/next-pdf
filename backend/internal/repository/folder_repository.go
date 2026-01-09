@@ -234,3 +234,44 @@ func (r *FolderRepository) GetDescendantIDs(ctx context.Context, folderID uuid.U
 
 	return ids, nil
 }
+
+// GetByWorkspaceID returns folders for all users who are members of the given workspace.
+// This allows workspace members to see each other's folders.
+func (r *FolderRepository) GetByWorkspaceID(ctx context.Context, workspaceID uuid.UUID) ([]*models.FolderWithCounts, error) {
+	query := `
+		SELECT f.id, f.user_id, f.parent_id, f.name, f.path, f.depth, f.sort_order,
+		       f.created_at, f.updated_at,
+		       COUNT(DISTINCT files.id) AS file_count,
+		       COALESCE(SUM(files.file_size), 0) AS total_size
+		FROM folders f
+		LEFT JOIN files ON files.folder_id = f.id
+		WHERE f.user_id IN (
+			SELECT user_id FROM workspace_members WHERE workspace_id = $1
+		)
+		GROUP BY f.id
+		ORDER BY f.sort_order, f.name
+	`
+
+	rows, err := r.db.Query(ctx, query, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var folders []*models.FolderWithCounts
+	for rows.Next() {
+		folder := &models.FolderWithCounts{}
+		err := rows.Scan(
+			&folder.ID, &folder.UserID, &folder.ParentID, &folder.Name,
+			&folder.Path, &folder.Depth, &folder.SortOrder,
+			&folder.CreatedAt, &folder.UpdatedAt,
+			&folder.FileCount, &folder.TotalSize,
+		)
+		if err != nil {
+			return nil, err
+		}
+		folders = append(folders, folder)
+	}
+
+	return folders, nil
+}

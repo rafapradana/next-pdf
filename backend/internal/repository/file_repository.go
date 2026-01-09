@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,27 +19,44 @@ type FileRepository struct {
 	db *pgxpool.Pool
 }
 
+type ExportRow struct {
+	ID               uuid.UUID
+	Filename         string
+	OriginalFilename string
+	Size             int64
+	PageCount        *int // Pointer to handle nulls
+	MimeType         string
+	UploadedAt       time.Time
+	Status           string
+	FolderPath       string
+	WorkspaceName    string
+	SummaryVersion   *int // Pointer to handle nulls
+	SummaryModel     *string
+	SummaryContent   *string
+	SummaryCreatedAt *time.Time
+}
+
 func NewFileRepository(db *pgxpool.Pool) *FileRepository {
 	return &FileRepository{db: db}
 }
 
 func (r *FileRepository) Create(ctx context.Context, file *models.File) error {
 	query := `
-		INSERT INTO files (user_id, folder_id, filename, original_filename, storage_path, 
+		INSERT INTO files (user_id, workspace_id, folder_id, filename, original_filename, storage_path, 
 		                   mime_type, file_size, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, uploaded_at, created_at, updated_at
 	`
 
 	return r.db.QueryRow(ctx, query,
-		file.UserID, file.FolderID, file.Filename, file.OriginalFilename,
+		file.UserID, file.WorkspaceID, file.FolderID, file.Filename, file.OriginalFilename,
 		file.StoragePath, file.MimeType, file.FileSize, file.Status,
 	).Scan(&file.ID, &file.UploadedAt, &file.CreatedAt, &file.UpdatedAt)
 }
 
 func (r *FileRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.File, error) {
 	query := `
-		SELECT id, user_id, folder_id, filename, original_filename, storage_path,
+		SELECT id, user_id, workspace_id, folder_id, filename, original_filename, storage_path,
 		       mime_type, file_size, page_count, status, error_message,
 		       uploaded_at, processed_at, created_at, updated_at
 		FROM files
@@ -46,7 +65,7 @@ func (r *FileRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Fil
 
 	file := &models.File{}
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&file.ID, &file.UserID, &file.FolderID, &file.Filename, &file.OriginalFilename,
+		&file.ID, &file.UserID, &file.WorkspaceID, &file.FolderID, &file.Filename, &file.OriginalFilename,
 		&file.StoragePath, &file.MimeType, &file.FileSize, &file.PageCount,
 		&file.Status, &file.ErrorMessage, &file.UploadedAt, &file.ProcessedAt,
 		&file.CreatedAt, &file.UpdatedAt,
@@ -63,13 +82,14 @@ func (r *FileRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Fil
 }
 
 type FileListParams struct {
-	UserID   uuid.UUID
-	FolderID *uuid.UUID
-	Status   *models.ProcessingStatus
-	Search   *string
-	Sort     string
-	Page     int
-	Limit    int
+	UserID      uuid.UUID
+	WorkspaceID *uuid.UUID
+	FolderID    *uuid.UUID
+	Status      *models.ProcessingStatus
+	Search      *string
+	Sort        string
+	Page        int
+	Limit       int
 }
 
 type FileWithSummary struct {
@@ -81,10 +101,21 @@ func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*Fi
 	baseQuery := `
 		FROM files f
 		LEFT JOIN summaries s ON s.file_id = f.id AND s.is_current = true
-		WHERE f.user_id = $1
+		WHERE 1=1
 	`
-	args := []interface{}{params.UserID}
-	argIndex := 2
+	args := []interface{}{}
+	argIndex := 1
+
+	if params.WorkspaceID != nil {
+		baseQuery += " AND f.workspace_id = " + placeholder(argIndex)
+		args = append(args, *params.WorkspaceID)
+		argIndex++
+	} else {
+		// Legacy behavior: Filter by UserID if no workspace specified
+		baseQuery += " AND f.user_id = " + placeholder(argIndex)
+		args = append(args, params.UserID)
+		argIndex++
+	}
 
 	if params.FolderID != nil {
 		baseQuery += " AND f.folder_id = " + placeholder(argIndex)
@@ -134,7 +165,7 @@ func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*Fi
 	args = append(args, params.Limit, offset)
 
 	selectQuery := `
-		SELECT f.id, f.user_id, f.folder_id, f.filename, f.original_filename, f.storage_path,
+		SELECT f.id, f.user_id, f.workspace_id, f.folder_id, f.filename, f.original_filename, f.storage_path,
 		       f.mime_type, f.file_size, f.page_count, f.status, f.error_message,
 		       f.uploaded_at, f.processed_at, f.created_at, f.updated_at,
 		       CASE WHEN s.id IS NOT NULL THEN true ELSE false END as has_summary
@@ -150,7 +181,7 @@ func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*Fi
 	for rows.Next() {
 		file := &FileWithSummary{}
 		err := rows.Scan(
-			&file.ID, &file.UserID, &file.FolderID, &file.Filename, &file.OriginalFilename,
+			&file.ID, &file.UserID, &file.WorkspaceID, &file.FolderID, &file.Filename, &file.OriginalFilename,
 			&file.StoragePath, &file.MimeType, &file.FileSize, &file.PageCount,
 			&file.Status, &file.ErrorMessage, &file.UploadedAt, &file.ProcessedAt,
 			&file.CreatedAt, &file.UpdatedAt, &file.HasSummary,
@@ -166,7 +197,7 @@ func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*Fi
 
 func (r *FileRepository) GetByFolderID(ctx context.Context, folderID uuid.UUID) ([]*models.File, error) {
 	query := `
-		SELECT id, user_id, folder_id, filename, original_filename, storage_path,
+		SELECT id, user_id, workspace_id, folder_id, filename, original_filename, storage_path,
 		       mime_type, file_size, page_count, status, error_message,
 		       uploaded_at, processed_at, created_at, updated_at
 		FROM files
@@ -184,7 +215,7 @@ func (r *FileRepository) GetByFolderID(ctx context.Context, folderID uuid.UUID) 
 	for rows.Next() {
 		file := &models.File{}
 		err := rows.Scan(
-			&file.ID, &file.UserID, &file.FolderID, &file.Filename, &file.OriginalFilename,
+			&file.ID, &file.UserID, &file.WorkspaceID, &file.FolderID, &file.Filename, &file.OriginalFilename,
 			&file.StoragePath, &file.MimeType, &file.FileSize, &file.PageCount,
 			&file.Status, &file.ErrorMessage, &file.UploadedAt, &file.ProcessedAt,
 			&file.CreatedAt, &file.UpdatedAt,
@@ -215,6 +246,96 @@ func (r *FileRepository) Move(ctx context.Context, fileID, userID uuid.UUID, fol
 	}
 
 	return nil
+}
+
+func (r *FileRepository) Export(ctx context.Context, params FileListParams, fileIDs []uuid.UUID) ([]ExportRow, error) {
+	query := `
+		SELECT 
+			f.id, f.filename, f.original_filename, f.file_size, f.page_count, f.mime_type, f.uploaded_at, f.status,
+			COALESCE(fo.name, '/'), COALESCE(w.name, 'Personal'),
+			s.version, s.model_used, s.content, s.created_at
+		FROM files f
+		LEFT JOIN folders fo ON f.folder_id = fo.id
+		LEFT JOIN workspaces w ON f.workspace_id = w.id
+		LEFT JOIN summaries s ON f.id = s.file_id
+		WHERE 1=1
+	`
+	args := []interface{}{}
+	argIdx := 1
+
+	if len(fileIDs) > 0 {
+		query += fmt.Sprintf(" AND f.id = ANY($%d)", argIdx)
+		args = append(args, fileIDs)
+		argIdx++
+	} else {
+		// Apply standard filters only if not selecting specific files
+		if params.WorkspaceID != nil {
+			query += fmt.Sprintf(" AND f.workspace_id = $%d", argIdx)
+			args = append(args, *params.WorkspaceID)
+			argIdx++
+		}
+
+		if params.FolderID != nil {
+			query += fmt.Sprintf(" AND f.folder_id = $%d", argIdx)
+			args = append(args, *params.FolderID)
+			argIdx++
+		}
+
+		if params.Search != nil && *params.Search != "" {
+			query += fmt.Sprintf(" AND f.original_filename ILIKE $%d", argIdx)
+			args = append(args, "%"+*params.Search+"%")
+			argIdx++
+		}
+
+		if params.Status != nil {
+			query += fmt.Sprintf(" AND f.status = $%d", argIdx)
+			args = append(args, *params.Status)
+			argIdx++
+		}
+
+		// Fallback: filter by user_id if no workspace is specified
+		if params.WorkspaceID == nil {
+			query += fmt.Sprintf(" AND f.user_id = $%d", argIdx)
+			args = append(args, params.UserID)
+			argIdx++
+		}
+	}
+
+	query += " ORDER BY f.created_at DESC, s.version DESC"
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ExportRow
+	for rows.Next() {
+		var r ExportRow
+
+		// Handling nullable summary fields
+		var sVersion *int
+		var sModel, sContent *string
+		var sCreatedAt *time.Time
+
+		err := rows.Scan(
+			&r.ID, &r.Filename, &r.OriginalFilename, &r.Size, &r.PageCount, &r.MimeType, &r.UploadedAt, &r.Status,
+			&r.FolderPath, &r.WorkspaceName,
+			&sVersion, &sModel, &sContent, &sCreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		r.SummaryVersion = sVersion
+		r.SummaryModel = sModel
+		r.SummaryContent = sContent
+		r.SummaryCreatedAt = sCreatedAt
+
+		results = append(results, r)
+	}
+
+	return results, nil
 }
 
 func (r *FileRepository) Rename(ctx context.Context, fileID, userID uuid.UUID, newName string) error {

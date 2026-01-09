@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { api, FolderTreeItem, FileItem, Summary, SummaryStyle, SummaryHistoryItem } from './api';
+import { useWorkspace } from './workspace-context';
 
 interface FileContextType {
   folders: FolderTreeItem[];
@@ -37,6 +38,7 @@ interface FileContextType {
 const FileContext = createContext<FileContextType | undefined>(undefined);
 
 export function FileProvider({ children }: { children: React.ReactNode }) {
+  const { currentWorkspace } = useWorkspace();
   const [folders, setFolders] = useState<FolderTreeItem[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
@@ -52,24 +54,35 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
 
   const refreshFolders = useCallback(async () => {
     setIsLoadingFolders(true);
-    const response = await api.getFolderTree(false, true);
+    const response = await api.getFolderTree(false, true, currentWorkspace?.id);
     if (response.data) {
       setFolders(response.data);
     }
     setIsLoadingFolders(false);
-  }, []);
+  }, [currentWorkspace]);
+
+
 
   const refreshFiles = useCallback(async (folderId?: string | null) => {
     setIsLoadingFiles(true);
     const response = await api.getFiles({
       folder_id: folderId === undefined ? selectedFolderId : folderId,
+      workspace_id: currentWorkspace?.id,
       sort: '-uploaded_at'
     });
     if (response.data) {
       setFiles(response.data);
     }
     setIsLoadingFiles(false);
-  }, [selectedFolderId]);
+  }, [selectedFolderId, currentWorkspace]);
+
+  // Refresh files and folders when workspace changes
+  useEffect(() => {
+    if (currentWorkspace) {
+      refreshFolders();
+      refreshFiles();
+    }
+  }, [currentWorkspace, refreshFolders, refreshFiles]);
 
   const selectFile = useCallback((file: FileItem | null) => {
     setSelectedFile(file);
@@ -166,7 +179,8 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
       file.name,
       file.size,
       file.type,
-      folderId
+      folderId,
+      currentWorkspace?.id
     );
 
     if (!presignResponse.data) {
@@ -196,7 +210,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
     }
 
     return { success: false, error: confirmResponse.error?.message || 'Failed to confirm upload' };
-  }, [refreshFiles]);
+  }, [refreshFiles, currentWorkspace]);
 
   const moveFile = useCallback(async (id: string, folderId: string | null) => {
     const response = await api.moveFile(id, folderId);

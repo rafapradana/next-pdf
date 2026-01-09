@@ -26,27 +26,27 @@ func NewPendingUploadRepository(db *pgxpool.Pool) *PendingUploadRepository {
 
 func (r *PendingUploadRepository) Create(ctx context.Context, upload *models.PendingUpload) error {
 	query := `
-		INSERT INTO pending_uploads (user_id, folder_id, filename, file_size, content_type, storage_path, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO pending_uploads (user_id, workspace_id, folder_id, filename, file_size, content_type, storage_path, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at
 	`
 
 	return r.db.QueryRow(ctx, query,
-		upload.UserID, upload.FolderID, upload.Filename, upload.FileSize,
+		upload.UserID, upload.WorkspaceID, upload.FolderID, upload.Filename, upload.FileSize,
 		upload.ContentType, upload.StoragePath, upload.ExpiresAt,
 	).Scan(&upload.ID, &upload.CreatedAt)
 }
 
 func (r *PendingUploadRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.PendingUpload, error) {
 	query := `
-		SELECT id, user_id, folder_id, filename, file_size, content_type, storage_path, expires_at, created_at
+		SELECT id, user_id, workspace_id, folder_id, filename, file_size, content_type, storage_path, expires_at, created_at
 		FROM pending_uploads
 		WHERE id = $1
 	`
 
 	upload := &models.PendingUpload{}
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&upload.ID, &upload.UserID, &upload.FolderID, &upload.Filename,
+		&upload.ID, &upload.UserID, &upload.WorkspaceID, &upload.FolderID, &upload.Filename,
 		&upload.FileSize, &upload.ContentType, &upload.StoragePath,
 		&upload.ExpiresAt, &upload.CreatedAt,
 	)

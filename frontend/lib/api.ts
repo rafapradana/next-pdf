@@ -181,10 +181,12 @@ class ApiClient {
   }
 
   // Folders
-  async getFolderTree(includeFiles = false, includeCounts = true) {
-    return this.request<FolderTreeItem[]>(
-      `/folders/tree?include_files=${includeFiles}&include_counts=${includeCounts}`
-    );
+  async getFolderTree(includeFiles = false, includeCounts = true, workspaceId?: string | null) {
+    const params = new URLSearchParams();
+    params.set('include_files', String(includeFiles));
+    params.set('include_counts', String(includeCounts));
+    if (workspaceId) params.set('workspace_id', workspaceId);
+    return this.request<FolderTreeItem[]>(`/folders/tree?${params.toString()}`);
   }
 
   async createFolder(name: string, parentId?: string | null) {
@@ -215,6 +217,7 @@ class ApiClient {
   // Files
   async getFiles(params?: {
     folder_id?: string | null;
+    workspace_id?: string | null;
     status?: string;
     search?: string;
     sort?: string;
@@ -223,6 +226,7 @@ class ApiClient {
   }) {
     const searchParams = new URLSearchParams();
     if (params?.folder_id) searchParams.set('folder_id', params.folder_id);
+    if (params?.workspace_id) searchParams.set('workspace_id', params.workspace_id);
     if (params?.status) searchParams.set('status', params.status);
     if (params?.search) searchParams.set('search', params.search);
     if (params?.sort) searchParams.set('sort', params.sort);
@@ -255,8 +259,73 @@ class ApiClient {
     return this.request(`/files/${id}`, { method: 'DELETE' });
   }
 
+  async exportFiles(params?: {
+    folder_id?: string | null;
+    workspace_id?: string | null;
+    status?: string;
+    search?: string;
+    file_ids?: string[];
+    format?: 'csv' | 'json';
+  }) {
+    const searchParams = new URLSearchParams();
+    if (params?.folder_id) searchParams.set('folder_id', params.folder_id);
+    if (params?.workspace_id) searchParams.set('workspace_id', params.workspace_id);
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.file_ids && params.file_ids.length > 0) {
+      searchParams.set('file_ids', params.file_ids.join(','));
+    }
+    if (params?.format) searchParams.set('format', params.format);
+
+    const query = searchParams.toString();
+    const url = `${API_BASE_URL}/files/export${query ? `?${query}` : ''}`;
+
+    // Create an anchor element to trigger download
+    // We do this via fetch to handle headers if needed, but direct link is easier for blob
+    // However, we need to pass Auth token.
+
+    const token = this.getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error('Export failed');
+    }
+
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+
+    // Try to get filename from Content-Disposition
+    const disposition = response.headers.get('Content-Disposition');
+    const contentType = response.headers.get('Content-Type');
+    const ext = (contentType?.includes('json') || params?.format === 'json') ? 'json' : 'csv';
+    let filename = `export.${ext}`;
+    if (disposition && disposition.indexOf('attachment') !== -1) {
+      const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+      const matches = filenameRegex.exec(disposition);
+      if (matches != null && matches[1]) {
+        filename = matches[1].replace(/['"]/g, '');
+      }
+    }
+
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(downloadUrl);
+    document.body.removeChild(a);
+  }
+
   // Upload
-  async getPresignedUploadUrl(filename: string, fileSize: number, contentType: string, folderId?: string | null) {
+  async getPresignedUploadUrl(filename: string, fileSize: number, contentType: string, folderId?: string | null, workspaceId?: string | null) {
     return this.request<{
       upload_id: string;
       presigned_url: string;
@@ -270,6 +339,7 @@ class ApiClient {
         file_size: fileSize,
         content_type: contentType,
         folder_id: folderId,
+        workspace_id: workspaceId,
       }),
     });
   }
@@ -333,6 +403,35 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ style, custom_instructions: customInstructions, language }),
     });
+  }
+  // Workspaces
+  async createWorkspace(name: string) {
+    return this.request<Workspace>('/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async updateWorkspace(id: string, name: string) {
+    return this.request<Workspace>(`/workspaces/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async joinWorkspace(inviteCode: string) {
+    return this.request<Workspace>('/workspaces/join', {
+      method: 'POST',
+      body: JSON.stringify({ invite_code: inviteCode }),
+    });
+  }
+
+  async getWorkspaces() {
+    return this.request<Workspace[]>('/workspaces');
+  }
+
+  async getWorkspaceMembers(id: string) {
+    return this.request<WorkspaceMember[]>(`/workspaces/${id}/members`);
   }
 }
 
@@ -407,6 +506,29 @@ export interface SummaryHistoryItem {
   language: string;
   is_current: boolean;
   created_at: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  invite_code?: string;
+  role: string;
+  is_owner: boolean;
+  member_count?: number;
+  created_at: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  role: string;
+  joined_at: string;
+  user?: {
+    full_name: string;
+    email: string;
+    avatar_url?: string;
+  };
 }
 
 export const api = new ApiClient();

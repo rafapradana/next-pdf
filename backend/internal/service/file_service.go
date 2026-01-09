@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,6 +86,7 @@ func (s *FileService) CreatePresignedUpload(ctx context.Context, userID uuid.UUI
 	expiresAt := time.Now().Add(s.storage.PresignExpiry())
 	pendingUpload := &models.PendingUpload{
 		UserID:      userID,
+		WorkspaceID: req.WorkspaceID,
 		FolderID:    req.FolderID,
 		Filename:    req.Filename,
 		FileSize:    req.FileSize,
@@ -145,6 +148,7 @@ func (s *FileService) ConfirmUpload(ctx context.Context, userID uuid.UUID, uploa
 	// Create file record
 	file := &models.File{
 		UserID:           userID,
+		WorkspaceID:      pendingUpload.WorkspaceID,
 		FolderID:         pendingUpload.FolderID,
 		Filename:         safeFilename,
 		OriginalFilename: pendingUpload.Filename,
@@ -366,4 +370,204 @@ func generateSafeFilename(filename string) string {
 	filename = strings.ToLower(filename)
 
 	return filename
+}
+
+func (s *FileService) ExportToCSV(ctx context.Context, userID uuid.UUID, workspaceID uuid.UUID, params repository.FileListParams, fileIDs []uuid.UUID) (io.Reader, error) {
+	// If workspaceID is provided, ensure params filter by it
+	if workspaceID != uuid.Nil {
+		params.WorkspaceID = &workspaceID
+	}
+	params.UserID = userID
+
+	// Fetch data
+	rows, err := s.fileRepo.Export(ctx, params, fileIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create pipe
+	pr, pw := io.Pipe()
+
+	go func() {
+		defer pw.Close()
+
+		// Write UTF-8 BOM for Excel compatibility
+		pw.Write([]byte{0xEF, 0xBB, 0xBF})
+
+		w := csv.NewWriter(pw)
+		defer w.Flush()
+
+		// Headers
+		headers := []string{
+			"File ID", "Filename", "Original Filename", "Size (Bytes)", "Page Count",
+			"Type", "Uploaded At", "Status", "Workspace", "Folder",
+			"Summary Version", "Summary Model", "Summary Created At", "Summary Content",
+		}
+		if err := w.Write(headers); err != nil {
+			return // or handle error better, but pipe will close
+		}
+
+		for _, r := range rows {
+			pageCount := ""
+			if r.PageCount != nil {
+				pageCount = strconv.Itoa(*r.PageCount)
+			}
+			record := []string{
+				r.ID.String(),
+				r.Filename,
+				r.OriginalFilename,
+				strconv.FormatInt(r.Size, 10),
+				pageCount,
+				r.MimeType,
+				r.UploadedAt.Format(time.RFC3339),
+				r.Status,
+				r.WorkspaceName,
+				r.FolderPath,
+			}
+
+			// Add summary fields (handle nil)
+			if r.SummaryVersion != nil {
+				var createdAt string
+				if r.SummaryCreatedAt != nil {
+					createdAt = r.SummaryCreatedAt.Format(time.RFC3339)
+				}
+				record = append(record,
+					strconv.Itoa(*r.SummaryVersion),
+					*r.SummaryModel,
+					createdAt,
+					*r.SummaryContent,
+				)
+			} else {
+				record = append(record, "", "", "", "")
+			}
+
+			if err := w.Write(record); err != nil {
+				return
+			}
+		}
+	}()
+
+	return pr, nil
+}
+
+// JSON Export types
+type ExportFileSummary struct {
+	Version   int       `json:"version"`
+	Model     string    `json:"model"`
+	CreatedAt time.Time `json:"created_at"`
+	Content   string    `json:"content"`
+}
+
+type ExportFile struct {
+	ID               uuid.UUID           `json:"id"`
+	Filename         string              `json:"filename"`
+	OriginalFilename string              `json:"original_filename"`
+	SizeBytes        int64               `json:"size_bytes"`
+	PageCount        *int                `json:"page_count"`
+	MimeType         string              `json:"mime_type"`
+	Status           string              `json:"status"`
+	UploadedAt       time.Time           `json:"uploaded_at"`
+	Folder           string              `json:"folder"`
+	Summaries        []ExportFileSummary `json:"summaries,omitempty"`
+}
+
+type ExportData struct {
+	ExportedAt time.Time    `json:"exported_at"`
+	Workspace  string       `json:"workspace"`
+	TotalFiles int          `json:"total_files"`
+	Files      []ExportFile `json:"files"`
+}
+
+func (s *FileService) ExportToJSON(ctx context.Context, userID uuid.UUID, workspaceID uuid.UUID, params repository.FileListParams, fileIDs []uuid.UUID) (*ExportData, error) {
+	if workspaceID != uuid.Nil {
+		params.WorkspaceID = &workspaceID
+	}
+	params.UserID = userID
+
+	rows, err := s.fileRepo.Export(ctx, params, fileIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group rows by file ID (since we may have multiple summary versions per file)
+	fileMap := make(map[uuid.UUID]*ExportFile)
+	var workspaceName string
+
+	for _, r := range rows {
+		workspaceName = r.WorkspaceName
+
+		if existing, ok := fileMap[r.ID]; ok {
+			// Add summary to existing file
+			if r.SummaryVersion != nil {
+				var createdAt time.Time
+				if r.SummaryCreatedAt != nil {
+					createdAt = *r.SummaryCreatedAt
+				}
+				model := ""
+				if r.SummaryModel != nil {
+					model = *r.SummaryModel
+				}
+				content := ""
+				if r.SummaryContent != nil {
+					content = *r.SummaryContent
+				}
+				existing.Summaries = append(existing.Summaries, ExportFileSummary{
+					Version:   *r.SummaryVersion,
+					Model:     model,
+					CreatedAt: createdAt,
+					Content:   content,
+				})
+			}
+		} else {
+			// Create new file entry
+			file := &ExportFile{
+				ID:               r.ID,
+				Filename:         r.Filename,
+				OriginalFilename: r.OriginalFilename,
+				SizeBytes:        r.Size,
+				PageCount:        r.PageCount,
+				MimeType:         r.MimeType,
+				Status:           r.Status,
+				UploadedAt:       r.UploadedAt,
+				Folder:           r.FolderPath,
+				Summaries:        []ExportFileSummary{},
+			}
+
+			if r.SummaryVersion != nil {
+				var createdAt time.Time
+				if r.SummaryCreatedAt != nil {
+					createdAt = *r.SummaryCreatedAt
+				}
+				model := ""
+				if r.SummaryModel != nil {
+					model = *r.SummaryModel
+				}
+				content := ""
+				if r.SummaryContent != nil {
+					content = *r.SummaryContent
+				}
+				file.Summaries = append(file.Summaries, ExportFileSummary{
+					Version:   *r.SummaryVersion,
+					Model:     model,
+					CreatedAt: createdAt,
+					Content:   content,
+				})
+			}
+
+			fileMap[r.ID] = file
+		}
+	}
+
+	// Convert to slice
+	files := make([]ExportFile, 0, len(fileMap))
+	for _, f := range fileMap {
+		files = append(files, *f)
+	}
+
+	return &ExportData{
+		ExportedAt: time.Now(),
+		Workspace:  workspaceName,
+		TotalFiles: len(files),
+		Files:      files,
+	}, nil
 }

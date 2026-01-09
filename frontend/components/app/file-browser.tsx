@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useFiles } from "@/lib/file-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { FileItem, FolderTreeItem } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,8 +45,10 @@ import {
   Check,
   ListFilter,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Download
 } from "lucide-react";
+import { api } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -86,6 +89,7 @@ type DateFilter = "all" | "today" | "7days" | "30days";
 
 export function FileBrowser() {
   const { folders, files, selectedFolderId, isLoadingFiles, selectFile, selectFolder, renameFile, deleteFile } = useFiles();
+  const { currentWorkspace } = useWorkspace();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -110,6 +114,8 @@ export function FileBrowser() {
 
   const [fileToDelete, setFileToDelete] = useState<FileItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const [isExporting, setIsExporting] = useState(false);
 
   // Determine if viewing all documents or specific folder
   const isViewingAll = selectedFolderId === null;
@@ -316,6 +322,45 @@ export function FileBrowser() {
     } else {
       toast.error("Failed to delete file", { description: result.error });
     }
+  }
+
+
+  const handleExport = async (format: 'csv' | 'json' = 'csv', singleFileId?: string) => {
+    try {
+      setIsExporting(true);
+
+      const params: any = { format };
+
+      // Always include workspace_id if available
+      if (currentWorkspace?.id) {
+        params.workspace_id = currentWorkspace.id;
+      }
+
+      if (singleFileId) {
+        params.file_ids = [singleFileId];
+      } else {
+        // Apply current view filters
+        if (!isViewingAll) {
+          if (filterFolder === "current") params.folder_id = selectedFolderId;
+          else if (filterFolder === "root") params.folder_id = "root";
+          else if (filterFolder !== "all") params.folder_id = filterFolder;
+        } else {
+          if (filterFolder === "root") params.folder_id = "root";
+          else if (filterFolder !== "current" && filterFolder !== "all") params.folder_id = filterFolder;
+        }
+
+        if (appliedSearch) params.search = appliedSearch;
+        if (filterStatus !== "all") params.status = filterStatus;
+      }
+
+      await api.exportFiles(params);
+      toast.success(`Export ${format.toUpperCase()} started`);
+    } catch (error) {
+      toast.error("Failed to export files");
+      console.error(error);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Stats for current view
@@ -450,6 +495,29 @@ export function FileBrowser() {
                 </button>
               )}
             </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="gap-2 bg-white hidden sm:flex"
+                  disabled={isExporting || filteredAndSortedFiles.length === 0}
+                >
+                  {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('csv')}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Export as CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('json')}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Export as JSON
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -649,6 +717,9 @@ export function FileBrowser() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={(e) => openRename(e, file)}>
                               <Pencil className="mr-2 h-4 w-4" /> Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport(file.id)}>
+                              <Download className="mr-2 h-4 w-4" /> Export CSV
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={(e) => openDelete(e, file)} className="text-red-600 focus:text-red-600 focus:bg-red-50">

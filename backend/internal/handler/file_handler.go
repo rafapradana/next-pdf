@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -25,21 +26,23 @@ import (
 )
 
 type FileHandler struct {
-	fileService  *service.FileService
-	httpClient   *http.Client
-	aiServiceURL string
+	fileService      *service.FileService
+	workspaceService *service.WorkspaceService
+	httpClient       *http.Client
+	aiServiceURL     string
 }
 
-func NewFileHandler(fileService *service.FileService) *FileHandler {
+func NewFileHandler(fileService *service.FileService, workspaceService *service.WorkspaceService) *FileHandler {
 	aiURL := os.Getenv("AI_SERVICE_URL")
 	if aiURL == "" {
 		aiURL = "http://localhost:8000"
 	}
 
 	return &FileHandler{
-		fileService:  fileService,
-		httpClient:   &http.Client{Timeout: 0},
-		aiServiceURL: aiURL,
+		fileService:      fileService,
+		workspaceService: workspaceService,
+		httpClient:       &http.Client{Timeout: 0},
+		aiServiceURL:     aiURL,
 	}
 }
 
@@ -192,6 +195,22 @@ func (h *FileHandler) List(c *fiber.Ctx) error {
 		params.Search = &search
 	}
 
+	// Parse workspace_id
+	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
+		workspaceID, err := uuid.Parse(workspaceIDStr)
+		if err == nil {
+			// Verify access
+			_, err := h.workspaceService.VerifyMemberAccess(c.Context(), workspaceID, userID)
+			if err != nil {
+				return c.Status(fiber.StatusForbidden).JSON(models.NewErrorResponse(
+					"FORBIDDEN",
+					"You do not have access to this workspace",
+				))
+			}
+			params.WorkspaceID = &workspaceID
+		}
+	}
+
 	files, totalCount, err := h.fileService.List(c.Context(), params)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse(
@@ -201,6 +220,95 @@ func (h *FileHandler) List(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(models.NewPaginatedResponse(files, params.Page, params.Limit, totalCount))
+}
+
+func (h *FileHandler) Export(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+
+	params := repository.FileListParams{
+		UserID: userID,
+	}
+
+	// Parse format (default to csv)
+	format := c.Query("format", "csv")
+	if format != "json" && format != "csv" {
+		format = "csv"
+	}
+
+	// Parse filtering params just like List
+	if folderIDStr := c.Query("folder_id"); folderIDStr != "" {
+		if folderID, err := uuid.Parse(folderIDStr); err == nil {
+			params.FolderID = &folderID
+		}
+	}
+	if statusStr := c.Query("status"); statusStr != "" {
+		status := models.ProcessingStatus(statusStr)
+		params.Status = &status
+	}
+	if search := c.Query("search"); search != "" {
+		params.Search = &search
+	}
+
+	// Parse file_ids (optional)
+	var fileIDs []uuid.UUID
+	if fileIDsStr := c.Query("file_ids"); fileIDsStr != "" {
+		for _, idStr := range strings.Split(fileIDsStr, ",") {
+			if id, err := uuid.Parse(strings.TrimSpace(idStr)); err == nil {
+				fileIDs = append(fileIDs, id)
+			}
+		}
+	}
+
+	// Parse workspace_id
+	var workspaceID uuid.UUID
+	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
+		if id, err := uuid.Parse(workspaceIDStr); err == nil {
+			// Verify access
+			_, err := h.workspaceService.VerifyMemberAccess(c.Context(), id, userID)
+			if err != nil {
+				return c.Status(fiber.StatusForbidden).JSON(models.NewErrorResponse(
+					"FORBIDDEN",
+					"You do not have access to this workspace",
+				))
+			}
+			workspaceID = id
+		}
+	}
+
+	timestamp := time.Now().Format("20060102_150405")
+
+	if format == "json" {
+		// Export as JSON
+		jsonData, err := h.fileService.ExportToJSON(c.Context(), userID, workspaceID, params, fileIDs)
+		if err != nil {
+			log.Printf("Export error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse(
+				"INTERNAL_ERROR",
+				"Failed to export files: "+err.Error(),
+			))
+		}
+
+		filename := fmt.Sprintf("files_export_%s.json", timestamp)
+		c.Set("Content-Type", "application/json")
+		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+		return c.JSON(jsonData)
+	}
+
+	// Export as CSV (default)
+	csvReader, err := h.fileService.ExportToCSV(c.Context(), userID, workspaceID, params, fileIDs)
+	if err != nil {
+		log.Printf("Export error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse(
+			"INTERNAL_ERROR",
+			"Failed to export files: "+err.Error(),
+		))
+	}
+
+	filename := fmt.Sprintf("files_export_%s.csv", timestamp)
+	c.Set("Content-Type", "text/csv")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+
+	return c.SendStream(csvReader)
 }
 
 func (h *FileHandler) GetByID(c *fiber.Ctx) error {

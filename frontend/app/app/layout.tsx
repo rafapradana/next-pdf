@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { FileProvider } from "@/lib/file-context";
+import { WorkspaceProvider } from "@/lib/workspace-context";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { Loader2 } from "lucide-react";
@@ -31,11 +32,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <FileProvider>
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>{children}</SidebarInset>
-      </SidebarProvider>
-    </FileProvider>
+    <WorkspaceProvider>
+      <FileProvider>
+        <SidebarProvider>
+          <AppSidebar />
+          <SidebarInset>{children}</SidebarInset>
+        </SidebarProvider>
+      </FileProvider>
+    </WorkspaceProvider>
   );
 }

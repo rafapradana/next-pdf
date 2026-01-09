@@ -23,23 +23,26 @@ var (
 )
 
 type AuthService struct {
-	userRepo    *repository.UserRepository
-	tokenRepo   *repository.TokenRepository
-	sessionRepo *repository.SessionRepository
-	jwtConfig   config.JWTConfig
+	userRepo         *repository.UserRepository
+	tokenRepo        *repository.TokenRepository
+	sessionRepo      *repository.SessionRepository
+	workspaceService *WorkspaceService
+	jwtConfig        config.JWTConfig
 }
 
 func NewAuthService(
 	userRepo *repository.UserRepository,
 	tokenRepo *repository.TokenRepository,
 	sessionRepo *repository.SessionRepository,
+	workspaceService *WorkspaceService,
 	jwtConfig config.JWTConfig,
 ) *AuthService {
 	return &AuthService{
-		userRepo:    userRepo,
-		tokenRepo:   tokenRepo,
-		sessionRepo: sessionRepo,
-		jwtConfig:   jwtConfig,
+		userRepo:         userRepo,
+		tokenRepo:        tokenRepo,
+		sessionRepo:      sessionRepo,
+		workspaceService: workspaceService,
+		jwtConfig:        jwtConfig,
 	}
 }
 
@@ -57,6 +60,21 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
+		return nil, err
+	}
+
+	// Create default workspace
+	workspaceName := "My Workspace"
+	if user.FullName != nil {
+		workspaceName = *user.FullName + "'s Workspace"
+	}
+	_, err = s.workspaceService.CreateWorkspace(ctx, user.ID, workspaceName)
+	if err != nil {
+		// Log error but don't fail registration?
+		// Or fail registration? Better to fail so state is consistent.
+		// However, user is already created. We might need transaction.
+		// For MVP, we'll log or return error.
+		// Ideally this should be in a transaction.
 		return nil, err
 	}
 

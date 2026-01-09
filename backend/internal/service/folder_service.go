@@ -120,6 +120,72 @@ func (s *FolderService) GetTree(ctx context.Context, userID uuid.UUID, includeFi
 	return rootNodes, nil
 }
 
+// GetTreeByWorkspaceID returns the folder tree for all members of a workspace.
+func (s *FolderService) GetTreeByWorkspaceID(ctx context.Context, workspaceID uuid.UUID, includeFiles, includeCounts bool) ([]*models.FolderTreeNode, error) {
+	folders, err := s.folderRepo.GetByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build tree structure (same logic as GetTree)
+	nodeMap := make(map[uuid.UUID]*models.FolderTreeNode)
+	var rootNodes []*models.FolderTreeNode
+
+	for _, f := range folders {
+		node := &models.FolderTreeNode{
+			ID:        f.ID,
+			Name:      f.Name,
+			ParentID:  f.ParentID,
+			Depth:     f.Depth,
+			SortOrder: f.SortOrder,
+			CreatedAt: f.CreatedAt,
+			Children:  []*models.FolderTreeNode{},
+		}
+
+		if includeCounts {
+			node.FileCount = f.FileCount
+			node.TotalSize = f.TotalSize
+		}
+
+		nodeMap[f.ID] = node
+	}
+
+	for _, f := range folders {
+		node := nodeMap[f.ID]
+		if f.ParentID == nil {
+			rootNodes = append(rootNodes, node)
+		} else {
+			if parent, ok := nodeMap[*f.ParentID]; ok {
+				parent.Children = append(parent.Children, node)
+			}
+		}
+	}
+
+	if includeFiles {
+		for _, node := range nodeMap {
+			files, err := s.fileRepo.GetByFolderID(ctx, node.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range files {
+				node.Files = append(node.Files, &models.FileResponse{
+					ID:               f.ID,
+					Filename:         f.Filename,
+					OriginalFilename: f.OriginalFilename,
+					FolderID:         f.FolderID,
+					FileSize:         f.FileSize,
+					PageCount:        f.PageCount,
+					Status:           f.Status,
+					UploadedAt:       f.UploadedAt,
+					ProcessedAt:      f.ProcessedAt,
+				})
+			}
+		}
+	}
+
+	return rootNodes, nil
+}
+
 func (s *FolderService) Update(ctx context.Context, userID, folderID uuid.UUID, req *models.UpdateFolderRequest) (*models.Folder, error) {
 	folder, err := s.folderRepo.GetByID(ctx, folderID)
 	if err != nil {
