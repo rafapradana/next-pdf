@@ -84,13 +84,13 @@ Next PDF is a modern, full-stack application designed to manage, organize, and a
 
 ```mermaid
 graph TD
-    Client[Frontend (Next.js)]
-    LB[Load Balancer / Nginx]
-    BE[Backend API (Go/Fiber)]
-    AI[AI Service (Python/FastAPI)]
-    DB[(PostgreSQL)]
-    S3[(MinIO Storage)]
-    Gemini[Google Gemini API]
+    Client["Frontend (Next.js)"]
+    LB["Load Balancer / Nginx"]
+    BE["Backend API (Go/Fiber)"]
+    AI["AI Service (Python/FastAPI)"]
+    DB[("PostgreSQL")]
+    S3[("MinIO Storage")]
+    Gemini["Google Gemini API"]
 
     Client -->|HTTP/REST| BE
     Client -->|Upload/Download| S3
