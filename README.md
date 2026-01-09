@@ -85,7 +85,6 @@ Next PDF is a modern, full-stack application designed to manage, organize, and a
 ```mermaid
 graph TD
     Client["Frontend (Next.js)"]
-    LB["Load Balancer / Nginx"]
     BE["Backend API (Go/Fiber)"]
     AI["AI Service (Python/FastAPI)"]
     DB[("PostgreSQL")]
