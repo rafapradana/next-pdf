@@ -21,7 +21,7 @@ interface FileContextType {
   refreshFiles: (folderId?: string | null) => Promise<void>;
   selectFile: (file: FileItem | null) => void;
   selectFolder: (folderId: string | null) => void;
-  loadSummary: (fileId: string) => Promise<void>;
+  loadSummary: (fileId: string, version?: number) => Promise<void>;
   loadSummaryHistory: (fileId: string) => Promise<void>;
   loadSummaryStyles: () => Promise<void>;
   createFolder: (name: string, parentId?: string | null) => Promise<{ success: boolean; error?: string }>;

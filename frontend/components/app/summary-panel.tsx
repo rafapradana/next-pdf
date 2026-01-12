@@ -381,14 +381,45 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
               </div>
             ) : currentSummary ? (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <h3 className="text-lg font-bold text-neutral-900 leading-snug">
-                    {currentSummary.title}
+                {/* Header: Title + Metadata Chips */}
+                <div className="space-y-2.5">
+                  <h3 className="text-lg font-bold text-neutral-900 leading-snug pr-2">
+                    {currentSummary.title?.replace(/^\*+\s*/, '') || 'Summary'}
                   </h3>
+
+                  {/* Inline Metadata Chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-500">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                      ✨ {currentSummary.model_used?.replace('gemini-', '') || "2.5-flash"}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                      {getLanguageFlag(currentSummary.language)} {getLanguageName(currentSummary.language)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                      {STYLE_ICONS[currentSummary.style] || "📄"} {summaryStyles.find(s => s.id === currentSummary.style)?.name || currentSummary.style}
+                    </span>
+                    {currentSummary.prompt_tokens > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                        🔢 {currentSummary.prompt_tokens + (currentSummary.completion_tokens || 0)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className="border-t" />
+
+                {/* Content */}
+                <div className="prose prose-sm prose-neutral max-w-none">
+                  <div dangerouslySetInnerHTML={{ __html: formatMarkdown(currentSummary.content) }} />
+                </div>
+
+                {/* Regenerate Button - Fixed at Bottom */}
+                <div className="sticky bottom-0 pt-3 pb-1 bg-gradient-to-t from-white via-white to-transparent -mx-4 px-4">
                   <Dialog open={isRegenerateOpen} onOpenChange={setIsRegenerateOpen}>
                     <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" className="shrink-0 rounded-full">
-                        <RefreshCw className="h-3 w-3 mr-2" /> Regenerate
+                      <Button variant="outline" className="w-full h-9 text-sm">
+                        <RefreshCw className="h-3.5 w-3.5 mr-2" /> Regenerate Summary
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
@@ -401,25 +432,6 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                       <SummaryForm isRegenerate />
                     </DialogContent>
                   </Dialog>
-                </div>
-
-                <div className="prose prose-sm prose-neutral max-w-none">
-                  <div dangerouslySetInnerHTML={{ __html: formatMarkdown(currentSummary.content) }} />
-                </div>
-
-                {/* Metadata */}
-                <div className="flex flex-wrap gap-2 pt-4 border-t text-xs text-neutral-500">
-                  <span className="px-2 py-1 bg-neutral-100 rounded-full">
-                    ✨ {currentSummary.model_used || "Gemini 2.0 Flash"}
-                  </span>
-                  <span className="px-2 py-1 bg-neutral-100 rounded-full">
-                    📝 {LANGUAGES.find(l => l.id === currentSummary.language)?.name || currentSummary.language}
-                  </span>
-                  {currentSummary.prompt_tokens > 0 && (
-                    <span className="px-2 py-1 bg-neutral-100 rounded-full">
-                      🔄 {currentSummary.prompt_tokens + (currentSummary.completion_tokens || 0)} Tokens
-                    </span>
-                  )}
                 </div>
               </motion.div>
             ) : (
