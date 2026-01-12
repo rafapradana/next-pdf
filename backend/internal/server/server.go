@@ -28,7 +28,7 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 		AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Requested-With",
 		AllowCredentials: true,
-		ExposeHeaders:    "X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset",
+		ExposeHeaders:    "X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset,Content-Disposition",
 	}))
 	app.Use(middleware.RateLimitMiddleware(cfg.RateLimit))
 

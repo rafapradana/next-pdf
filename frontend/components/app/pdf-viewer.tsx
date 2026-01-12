@@ -16,9 +16,10 @@ import {
 interface PDFViewerProps {
   url: string | null;
   filename: string;
+  pageCount?: number;
 }
 
-export function PDFViewer({ url, filename }: PDFViewerProps) {
+export function PDFViewer({ url, filename, pageCount }: PDFViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [zoom, setZoom] = useState(100);
   const [rotation, setRotation] = useState(0);
@@ -57,6 +58,11 @@ export function PDFViewer({ url, filename }: PDFViewerProps) {
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
         <div className="flex items-center gap-2">
+          {pageCount !== undefined && (
+            <div className="bg-white px-2 py-1 rounded border text-xs font-medium text-neutral-600 mr-2 shadow-sm">
+              {pageCount} Pages
+            </div>
+          )}
           <Button variant="outline" size="icon" onClick={handleZoomOut} disabled={zoom <= 50}>
             <ZoomOut className="h-4 w-4" />
           </Button>

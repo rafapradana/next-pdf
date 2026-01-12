@@ -49,11 +49,30 @@ func (r *SummaryRepository) Create(ctx context.Context, summary *SummaryCreate) 
 	`
 
 	var id uuid.UUID
-	return r.db.QueryRow(ctx, query,
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Update existing summaries to not be current
+	_, err = tx.Exec(ctx, "UPDATE summaries SET is_current = false WHERE file_id = $1", summary.FileID)
+	if err != nil {
+		return err
+	}
+
+	err = tx.QueryRow(ctx, query,
 		summary.FileID, summary.Title, summary.Content, summary.Style,
 		summary.CustomInstructions, summary.ModelUsed, summary.PromptTokens,
 		summary.CompletionTokens, summary.ProcessingDurationMs, lang,
 	).Scan(&id)
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *SummaryRepository) GetCurrentByFileID(ctx context.Context, fileID uuid.UUID) (*models.Summary, error) {

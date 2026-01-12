@@ -33,6 +33,7 @@ interface FileContextType {
   renameFile: (id: string, name: string) => Promise<{ success: boolean; error?: string }>;
   deleteFile: (id: string) => Promise<{ success: boolean; error?: string }>;
   generateSummary: (fileId: string, style: string, customInstructions?: string, language?: string) => Promise<{ success: boolean; error?: string }>;
+  setCurrentSummary: (summary: Summary | null) => void;
 }
 
 const FileContext = createContext<FileContextType | undefined>(undefined);
@@ -95,9 +96,9 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
     setSelectedFolderId(folderId);
   }, []);
 
-  const loadSummary = useCallback(async (fileId: string) => {
+  const loadSummary = useCallback(async (fileId: string, version?: number) => {
     setIsLoadingSummary(true);
-    const response = await api.getSummary(fileId);
+    const response = await api.getSummary(fileId, version);
     if (response.data && 'content' in response.data) {
       setCurrentSummary(response.data as Summary);
     } else {
@@ -326,6 +327,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
         renameFile,
         deleteFile,
         generateSummary,
+        setCurrentSummary, // Expose this
       }}
     >
       {children}

@@ -206,6 +206,9 @@ export function FileBrowser() {
       } else if (sortConfig.key === "uploaded_at") {
         aValue = new Date(aValue).getTime();
         bValue = new Date(bValue).getTime();
+      } else if (sortConfig.key === "page_count") {
+        aValue = aValue || 0;
+        bValue = bValue || 0;
       }
 
       if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
@@ -660,6 +663,7 @@ export function FileBrowser() {
                 <TableHeader className="bg-neutral-50/50">
                   <TableRow className="hover:bg-transparent group/header">
                     <SortableHeader label="Name" sortKey="original_filename" className="w-[40%]" />
+                    <SortableHeader label="Pages" sortKey="page_count" className="w-[80px]" />
                     {isViewingAll && <TableHead className="h-10">Folder</TableHead>}
                     <SortableHeader label="Size" sortKey="file_size" />
                     <SortableHeader label="Uploaded" sortKey="uploaded_at" />
@@ -681,13 +685,11 @@ export function FileBrowser() {
                           </div>
                           <div className="min-w-0">
                             <p className="font-medium text-sm truncate text-neutral-900">{file.original_filename}</p>
-                            {file.page_count && (
-                              <p className="text-[11px] text-muted-foreground">
-                                {file.page_count} pages
-                              </p>
-                            )}
                           </div>
                         </div>
+                      </TableCell>
+                      <TableCell className="py-2 whitespace-nowrap text-sm text-neutral-600 font-medium">
+                        {file.page_count || "-"}
                       </TableCell>
                       {isViewingAll && (
                         <TableCell className="py-2">

@@ -43,14 +43,14 @@ func NewFileRepository(db *pgxpool.Pool) *FileRepository {
 func (r *FileRepository) Create(ctx context.Context, file *models.File) error {
 	query := `
 		INSERT INTO files (user_id, workspace_id, folder_id, filename, original_filename, storage_path, 
-		                   mime_type, file_size, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		                   mime_type, file_size, page_count, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, uploaded_at, created_at, updated_at
 	`
 
 	return r.db.QueryRow(ctx, query,
 		file.UserID, file.WorkspaceID, file.FolderID, file.Filename, file.OriginalFilename,
-		file.StoragePath, file.MimeType, file.FileSize, file.Status,
+		file.StoragePath, file.MimeType, file.FileSize, file.PageCount, file.Status,
 	).Scan(&file.ID, &file.UploadedAt, &file.CreatedAt, &file.UpdatedAt)
 }
 
@@ -98,6 +98,7 @@ type FileWithSummary struct {
 }
 
 func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*FileWithSummary, int64, error) {
+	// Base query joins files with summaries to check existence
 	baseQuery := `
 		FROM files f
 		LEFT JOIN summaries s ON s.file_id = f.id AND s.is_current = true
@@ -106,43 +107,50 @@ func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*Fi
 	args := []interface{}{}
 	argIndex := 1
 
+	// --- FILTERING LOGIC ---
+	// 1. Workspace Isolation: STRICTLY filter by WorkspaceID to ensure data segregation.
 	if params.WorkspaceID != nil {
 		baseQuery += " AND f.workspace_id = " + placeholder(argIndex)
 		args = append(args, *params.WorkspaceID)
 		argIndex++
 	} else {
-		// Legacy behavior: Filter by UserID if no workspace specified
+		// Legacy/Private Fallback: Filter by UserID if no workspace context exists.
 		baseQuery += " AND f.user_id = " + placeholder(argIndex)
 		args = append(args, params.UserID)
 		argIndex++
 	}
 
+	// 2. Folder Navigation: Filter by specific folder (or root).
 	if params.FolderID != nil {
 		baseQuery += " AND f.folder_id = " + placeholder(argIndex)
 		args = append(args, *params.FolderID)
 		argIndex++
 	}
 
+	// 3. Status Filtering: Filter by processing status (e.g., 'completed', 'failed').
 	if params.Status != nil {
 		baseQuery += " AND f.status = " + placeholder(argIndex)
 		args = append(args, *params.Status)
 		argIndex++
 	}
 
+	// 4. Search Functionality: Case-insensitive ILIKE search on filename OR original_filename.
 	if params.Search != nil && *params.Search != "" {
 		baseQuery += " AND (f.filename ILIKE " + placeholder(argIndex) + " OR f.original_filename ILIKE " + placeholder(argIndex) + ")"
 		args = append(args, "%"+*params.Search+"%")
 		argIndex++
 	}
 
-	// Count query
+	// Count query for pagination meta
 	countQuery := "SELECT COUNT(*) " + baseQuery
 	var totalCount int64
 	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return nil, 0, err
 	}
 
-	// Sort
+	// --- SORTING LOGIC ---
+	// Maps frontend sort keys to database columns.
+	// Supports ascending (default) and descending (prefix '-') order.
 	orderBy := " ORDER BY "
 	switch params.Sort {
 	case "filename":
@@ -155,11 +163,18 @@ func (r *FileRepository) List(ctx context.Context, params FileListParams) ([]*Fi
 		orderBy += "f.file_size ASC"
 	case "-file_size":
 		orderBy += "f.file_size DESC"
+	case "page_count":
+		orderBy += "f.page_count ASC"
+	case "-page_count":
+		orderBy += "f.page_count DESC"
 	default:
+		// Default sort: Newest files first
 		orderBy += "f.uploaded_at DESC"
 	}
 
-	// Pagination
+	// --- PAGINATION LOGIC ---
+	// Standard SQL Limit/Offset pagination.
+	// Offset = (Page - 1) * Limit
 	offset := (params.Page - 1) * params.Limit
 	pagination := " LIMIT " + placeholder(argIndex) + " OFFSET " + placeholder(argIndex+1)
 	args = append(args, params.Limit, offset)

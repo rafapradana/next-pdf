@@ -46,6 +46,7 @@ htmlcov/
 # Go
 vendor/
 *.test
+bin/
 
 # Python
 *.egg-info/

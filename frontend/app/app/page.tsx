@@ -72,8 +72,8 @@ export default function AppPage() {
         <Breadcrumb className="flex-1">
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink 
-                href="/app" 
+              <BreadcrumbLink
+                href="/app"
                 className="flex items-center gap-1"
                 onClick={(e) => { e.preventDefault(); selectFile(null); }}
               >
@@ -113,10 +113,14 @@ export default function AppPage() {
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         {selectedFile ? (
-          <ResizablePanelGroup direction="horizontal">
+          <ResizablePanelGroup direction="horizontal" className="h-full">
             {/* PDF Viewer */}
             <ResizablePanel defaultSize={65} minSize={40}>
-              <PDFViewer url={pdfUrl} filename={selectedFile.original_filename} />
+              <PDFViewer
+                url={pdfUrl}
+                filename={selectedFile.original_filename}
+                pageCount={selectedFile.page_count}
+              />
             </ResizablePanel>
 
             <ResizableHandle withHandle />

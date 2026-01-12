@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -151,7 +152,11 @@ func (h *FileHandler) SummarizeStream(c *fiber.Ctx) error {
 						go func(res models.SummaryCallbackRequest) {
 							saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 							defer cancel()
-							_ = h.fileService.SaveStreamSummary(saveCtx, userID, fileID, res)
+							if err := h.fileService.SaveStreamSummary(saveCtx, userID, fileID, res); err != nil {
+								log.Printf("ERROR: Failed to save summary for file %s: %v", fileID, err)
+							} else {
+								log.Printf("SUCCESS: Saved summary for file %s", fileID)
+							}
 						}(*event.Result)
 					}
 				}
@@ -275,7 +280,24 @@ func (h *FileHandler) Export(c *fiber.Ctx) error {
 		}
 	}
 
-	timestamp := time.Now().Format("20060102_150405")
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	filenameBase := "files_export"
+
+	if len(fileIDs) == 1 {
+		if file, err := h.fileService.GetFile(c.Context(), fileIDs[0]); err == nil {
+			// Sanitize original filename
+			safeName := strings.Map(func(r rune) rune {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+					return r
+				}
+				return '_'
+			}, strings.TrimSuffix(file.OriginalFilename, filepath.Ext(file.OriginalFilename)))
+
+			if len(safeName) > 0 {
+				filenameBase = safeName
+			}
+		}
+	}
 
 	if format == "json" {
 		// Export as JSON
@@ -288,7 +310,7 @@ func (h *FileHandler) Export(c *fiber.Ctx) error {
 			))
 		}
 
-		filename := fmt.Sprintf("files_export_%s.json", timestamp)
+		filename := fmt.Sprintf("%s_%s.json", filenameBase, timestamp)
 		c.Set("Content-Type", "application/json")
 		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 		return c.JSON(jsonData)
@@ -304,7 +326,7 @@ func (h *FileHandler) Export(c *fiber.Ctx) error {
 		))
 	}
 
-	filename := fmt.Sprintf("files_export_%s.csv", timestamp)
+	filename := fmt.Sprintf("%s_%s.csv", filenameBase, timestamp)
 	c.Set("Content-Type", "text/csv")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 

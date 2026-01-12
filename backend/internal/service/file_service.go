@@ -1,17 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ledongthuc/pdf"
 	"github.com/nextpdf/backend/internal/config"
 	"github.com/nextpdf/backend/internal/models"
 	"github.com/nextpdf/backend/internal/repository"
@@ -43,6 +46,10 @@ func NewFileService(
 		storage:           storage,
 		uploadConfig:      uploadConfig,
 	}
+}
+
+func (s *FileService) GetFile(ctx context.Context, id uuid.UUID) (*models.File, error) {
+	return s.fileRepo.GetByID(ctx, id)
 }
 
 func (s *FileService) CreatePresignedUpload(ctx context.Context, userID uuid.UUID, req *models.PresignRequest) (*models.PresignResponse, error) {
@@ -131,6 +138,35 @@ func (s *FileService) ConfirmUpload(ctx context.Context, userID uuid.UUID, uploa
 		return nil, fmt.Errorf("file not found in storage")
 	}
 
+	// Count pages
+	var pageCount *int
+	if strings.HasPrefix(pendingUpload.ContentType, "application/pdf") {
+		log.Printf("Analyzing PDF for page count: %s", pendingUpload.StoragePath)
+		obj, err := s.storage.GetObject(ctx, s.storage.BucketUploads(), pendingUpload.StoragePath)
+		if err == nil {
+			defer obj.Close()
+			data, err := io.ReadAll(obj)
+			if err == nil {
+				reader, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+				if err == nil {
+					pc := reader.NumPage()
+					log.Printf("Page count for %s: %d", pendingUpload.StoragePath, pc)
+					if pc > 0 {
+						pageCount = &pc
+					}
+				} else {
+					log.Printf("Failed to create PDF reader: %v", err)
+				}
+			} else {
+				log.Printf("Failed to read object data: %v", err)
+			}
+		} else {
+			log.Printf("Failed to get object for page count: %v", err)
+		}
+	} else {
+		log.Printf("Skipping page count for content type: %s", pendingUpload.ContentType)
+	}
+
 	// Move file from uploads bucket to files bucket
 	if err := s.storage.CopyObject(ctx,
 		s.storage.BucketUploads(), pendingUpload.StoragePath,
@@ -155,6 +191,7 @@ func (s *FileService) ConfirmUpload(ctx context.Context, userID uuid.UUID, uploa
 		StoragePath:      pendingUpload.StoragePath,
 		MimeType:         pendingUpload.ContentType,
 		FileSize:         pendingUpload.FileSize,
+		PageCount:        pageCount,
 		Status:           models.StatusUploaded,
 	}
 
@@ -356,7 +393,12 @@ func (s *FileService) SaveStreamSummary(ctx context.Context, userID, fileID uuid
 		Language:             req.Language,
 	}
 
-	return s.summaryRepo.Create(ctx, summary)
+	if err := s.summaryRepo.Create(ctx, summary); err != nil {
+		return err
+	}
+
+	// 3. CRITICAL: Update file status to completed so GetByFileID returns the summary
+	return s.fileRepo.UpdateStatus(ctx, fileID, models.StatusCompleted, nil)
 }
 
 func generateSafeFilename(filename string) string {

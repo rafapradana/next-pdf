@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # Google Gemini API
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     
     # MinIO Configuration
     minio_endpoint: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")

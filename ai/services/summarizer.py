@@ -18,7 +18,7 @@ from .chunker import TextChunker
 logger = logging.getLogger(__name__)
 
 # Maximum characters before chunking is applied
-MAX_SINGLE_CHUNK_SIZE = 2000000 
+MAX_SINGLE_CHUNK_SIZE = 500000 
 MAX_RECURSIVE_DEPTH = 3
 MAX_CONCURRENT_CHUNKS = 5
 MAX_RETRIES = 3
@@ -111,6 +111,19 @@ class Summarizer:
     """Handles AI-powered summarization using Google Gemini with recursive chunking"""
     
     def __init__(self):
+        """
+        Initialize the Summarizer service with Google Gemini configuration.
+        
+        Configuration Details:
+        - **Chunker**: Initializes TextChunker with 12k char limit and 500 char overlap 
+          to preserve context between segments.
+        - **Model**: Configures 'gemini-2.5-flash' (or env var) for optimal speed/quality balance.
+        - **Generation Config**:
+            - `temperature=0.2`: Low randomness for factual, consistent summaries.
+            - `top_p=0.8`: Nucleus sampling to focus on high-probability tokens.
+            - `top_k=40`: Limits vocabulary to top 40 likely next words.
+            - `max_output_tokens=4096`: Caps response length to prevent runaways.
+        """
         settings = get_settings()
         self.chunker = TextChunker(max_chunk_size=12000, overlap_size=500)
         
@@ -130,7 +143,20 @@ class Summarizer:
             logger.warning("Gemini API key not configured")
 
     async def validate_pdf(self, file_content: bytes) -> bool:
-        """Strictly validate PDF file content"""
+        """
+        Strictly validate PDF file content.
+        
+        Process:
+        1. Magic Number Check: Verifies the file starts with specific PDF signature bytes (`%PDF-`).
+           This is a fast, first-pass check to reject non-PDF files immediately.
+        2. Structural Integrity: Uses `pypdf` library to attempt parsing the file structure.
+           - Creates an in-memory byte stream (`io.BytesIO`).
+           - Attempts to read the PDF trailer and page tree.
+           - Checks if the document contains at least one valid page.
+           
+        Returns:
+            bool: True if file is a valid, readable PDF; False otherwise.
+        """
         if not file_content.startswith(b'%PDF-'):
             return False
         try:
@@ -216,7 +242,23 @@ SUMMARY:
     ) -> AsyncGenerator[dict, None]:
         """
         Generate summary with streaming logs and parallel processing.
-        Yields log messages and final result.
+        
+        This method implements a Recursive Chunking Strategy:
+        1. **Analysis**: Checks total text length.
+        2. **Recursive Processing** (`process_text`):
+           - If text <= `MAX_SINGLE_CHUNK_SIZE`: Summarizes directly.
+           - If text > `MAX_SINGLE_CHUNK_SIZE`: 
+             a. Splits text into chunks using `TextChunker` (preserves sentence boundaries).
+             b. Processes chunks in parallel using `asyncio.gather`.
+             c. Merges chunk summaries.
+             d. If merged summary is still too large, recurses to next level.
+             
+        Yields:
+            dict: Event objects containing:
+                - `log`: Status message for frontend progress updates.
+                - `final_text`: The completed summary text.
+                - `result`: Final object with title, content, and token usage.
+                - `error`: Error message if failure occurs.
         """
         if not self.model:
             yield {"error": "Gemini API key not configured"}
@@ -292,11 +334,15 @@ SUMMARY:
                 "result": {
                     "title": title,
                     "content": final_summary,
+                    "style": style,
+                    "language": language,
+                    "model_used": "gemini-2.5-flash",
                     "prompt_tokens": total_tokens["prompt"],
-                    "completion_tokens": total_tokens["completion"]
+                    "completion_tokens": total_tokens["completion"],
+                    "processing_duration_ms": 0  # Will be calculated by backend
                 }
             }
-
+            
         except Exception as e:
             logger.error(f"Stream summarization failed: {e}")
             yield {"error": str(e)}

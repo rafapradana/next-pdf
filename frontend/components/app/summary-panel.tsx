@@ -73,6 +73,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     loadSummary,
     loadSummaryHistory,
     loadSummaryStyles,
+    setCurrentSummary,
   } = useFiles();
 
   const [selectedStyle, setSelectedStyle] = useState("bullet_points");
@@ -167,11 +168,31 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
               if (data.log) {
                 setStreamLogs(prev => [...prev, data.log]);
               } else if (data.result) {
-                await new Promise(r => setTimeout(r, 500));
-                await loadSummary(file.id);
-                await loadSummaryHistory(file.id);
+                // Construct temporary summary object for immediate UI update
+                const tempSummary: any = {
+                  id: "temp-id", // Temporary ID
+                  file_id: file.id,
+                  version: (currentSummary?.version || 0) + 1,
+                  title: data.result.title,
+                  style: selectedStyle,
+                  content: data.result.content,
+                  model_used: "Gemini 2.5 Flash", // Or get from config/response
+                  processing_duration_ms: 0,
+                  language: selectedLanguage,
+                  is_current: true,
+                  created_at: new Date().toISOString(),
+                  processing_started_at: new Date().toISOString(),
+                  processing_completed_at: new Date().toISOString(),
+                  prompt_tokens: data.result.prompt_tokens,
+                  completion_tokens: data.result.completion_tokens,
+                };
+
+                setCurrentSummary(tempSummary);
                 setIsStreaming(false);
                 toast.success("Summary generated successfully");
+
+                // Only refresh history in background to avoid race conditions with main summary
+                loadSummaryHistory(file.id);
               } else if (data.error) {
                 throw new Error(data.error);
               }
@@ -303,8 +324,8 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
           </TabsList>
         </div>
 
-        <TabsContent value="summary" className="flex-1 flex flex-col p-0 m-0 overflow-hidden relative">
-          <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <TabsContent value="summary" className="flex-1 relative m-0 p-0">
+          <div className="absolute inset-0 overflow-auto p-4">
             {/* Error Overlay */}
             <AnimatePresence>
               {streamingError && (
@@ -405,79 +426,78 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
               // Initial Form State (No summary yet)
               <SummaryForm />
             )}
-          </ScrollArea>
+          </div>
         </TabsContent>
 
-        <TabsContent value="history" className="flex-1 overflow-hidden m-0">
-          <ScrollArea className="h-full">
-            <div className="p-4">
-              {isLoadingHistory ? (
-                <div className="space-y-4">
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                </div>
-              ) : summaryHistory.length > 0 ? (
-                <Accordion type="single" collapsible className="w-full space-y-2">
-                  <p className="text-sm text-muted-foreground mb-4 px-1">
-                    {summaryHistory.length} versions
-                  </p>
-                  {summaryHistory.map((item) => (
-                    <AccordionItem
-                      key={item.id}
-                      value={item.id}
-                      className={`border rounded-lg px-3 ${item.is_current ? 'bg-red-50 border-red-200' : 'hover:bg-neutral-50'}`}
-                    >
-                      <AccordionTrigger className="hover:no-underline py-3">
-                        <div className="flex flex-1 items-center gap-3 text-left overflow-hidden min-w-0 pr-2">
-                          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm truncate block max-w-full">
-                                {item.title || `Version ${item.version}`}
-                              </span>
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {formatDate(item.created_at)} • v{item.version}
-                            </span>
-                          </div>
+        <TabsContent value="history" className="flex-1 relative m-0 p-0">
+          <div className="absolute inset-0 overflow-auto p-4">
+            {isLoadingHistory ? (
+              <div className="space-y-4">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+            ) : summaryHistory.length > 0 ? (
+              <Accordion type="single" collapsible className="w-full">
+                <p className="text-xs text-muted-foreground mb-3">
+                  {summaryHistory.length} version{summaryHistory.length > 1 ? 's' : ''}
+                </p>
+                {summaryHistory.map((item) => (
+                  <AccordionItem
+                    key={item.id}
+                    value={item.id}
+                    className="border-b last:border-b-0"
+                  >
+                    <AccordionTrigger className="hover:no-underline py-2.5 text-left">
+                      <div className="flex flex-col gap-0.5 flex-1 min-w-0 pr-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm truncate">
+                            {item.title || `Version ${item.version}`}
+                          </span>
                           {item.is_current && (
-                            <Badge variant="secondary" className="bg-red-100 text-red-700 hover:bg-red-200 shrink-0 h-6">
+                            <Badge variant="secondary" className="bg-red-100 text-red-700 text-[10px] h-5 px-1.5">
                               Current
                             </Badge>
                           )}
                         </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="pb-3 pt-1">
-                        <div className="space-y-3 pl-1">
-                          <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                            <div className="flex items-center gap-1.5 text-xs text-neutral-600">
-                              <span>{getLanguageFlag(item.language)}</span>
-                              <span>{getLanguageName(item.language)}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-xs text-neutral-600">
-                              <Clock className="h-3.5 w-3.5" />
-                              <span>{formatDuration(item.processing_duration_ms || 0)}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-xs text-neutral-600">
-                              <FileText className="h-3.5 w-3.5" />
-                              <span>{STYLE_ICONS[item.style] || ""} {summaryStyles.find((s) => s.id === item.style)?.name || item.style}</span>
-                            </div>
-                          </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(item.created_at)} • v{item.version}
+                        </span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-3">
+                      <div className="space-y-3 text-sm">
+                        {/* Metadata Grid */}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                          <span>{getLanguageFlag(item.language)} {getLanguageName(item.language)}</span>
+                          <span>⏱️ {formatDuration(item.processing_duration_ms || 0)}</span>
+                          <span>{STYLE_ICONS[item.style] || "📄"} {summaryStyles.find((s) => s.id === item.style)?.name || item.style}</span>
                         </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center text-neutral-400">
-                  <History className="h-10 w-10 mb-3 opacity-50" />
-                  <h3 className="font-medium">No History Yet</h3>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+
+                        {/* Load Content Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-xs h-8"
+                          onClick={() => loadSummary(file.id, item.version)}
+                        >
+                          <FileText className="h-3.5 w-3.5 mr-1.5" />
+                          View Full Summary
+                        </Button>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-neutral-400">
+                <History className="h-10 w-10 mb-3 opacity-50" />
+                <h3 className="font-medium">No History Yet</h3>
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
-    </div>
+    </div >
   );
 }
 
