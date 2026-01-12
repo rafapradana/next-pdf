@@ -89,6 +89,9 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
   const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Tab State
+  const [activeTab, setActiveTab] = useState("summary");
+
   // Load summary styles on mount
   useEffect(() => {
     loadSummaryStyles();
@@ -312,7 +315,7 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
 
   return (
     <div className="h-full flex flex-col bg-white border-l">
-      <Tabs defaultValue="summary" className="flex-1 flex flex-col">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
         <div className="flex items-center justify-between px-4 border-b bg-neutral-50">
           <TabsList className="bg-transparent h-14 p-0 space-x-4">
             <TabsTrigger value="summary" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-red-600 rounded-none h-full px-2">
@@ -490,7 +493,11 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                           variant="outline"
                           size="sm"
                           className="w-full text-xs h-8"
-                          onClick={() => loadSummary(file.id, item.version)}
+                          onClick={async () => {
+                            await loadSummary(file.id, item.version);
+                            toast.success("Summary v" + item.version + " loaded successfully");
+                            setActiveTab("summary");
+                          }}
                         >
                           <FileText className="h-3.5 w-3.5 mr-1.5" />
                           View Full Summary
@@ -520,7 +527,7 @@ function formatMarkdown(content: string): string {
     .replace(/^# (.*$)/gim, '<h1 class="font-bold text-xl mt-4 mb-2">$1</h1>')
     .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/gim, '<em>$1</em>')
-    .replace(/^[-•]\s+(.*)$/gim, '<li class="ml-4">$1</li>')
+    .replace(/^[-•*]\s+(.*)$/gim, '<li class="ml-4">$1</li>')
     .replace(/(<li.*<\/li>)/gim, '<ul class="list-disc space-y-1 my-2">$1</ul>')
     .replace(/\n\n/g, '</p><p class="my-2">')
     .replace(/\n/g, '<br>');
