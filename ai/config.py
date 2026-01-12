@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     minio_use_ssl: bool = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
     minio_bucket_files: str = os.getenv("MINIO_BUCKET_FILES", "nextpdf-files")
     
+    # RabbitMQ
+    rabbitmq_url: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+
     # Backend callback
     backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8080")
     

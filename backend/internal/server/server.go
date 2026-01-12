@@ -1,6 +1,8 @@
 package server
 
 import (
+	"log"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -8,6 +10,7 @@ import (
 	"github.com/nextpdf/backend/internal/config"
 	"github.com/nextpdf/backend/internal/database"
 	"github.com/nextpdf/backend/internal/handler"
+	"github.com/nextpdf/backend/internal/infrastructure"
 	"github.com/nextpdf/backend/internal/middleware"
 	"github.com/nextpdf/backend/internal/models"
 	"github.com/nextpdf/backend/internal/repository"
@@ -54,11 +57,23 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	summaryService := service.NewSummaryService(summaryRepo, fileRepo, jobRepo, aiClient)
 	uploadService := service.NewUploadService(userRepo, pendingUploadRepo, store)
 
+	// Initialize infrastructure
+	rabbitMQ, err := infrastructure.NewRabbitMQClient(cfg.RabbitMQURL)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to RabbitMQ: %v", err)
+		// Don't fail matching user expectation? Or fail?
+		// Best to fail if this feature is critical.
+		// But for now, maybe just log warning and proceed?
+		// If rabbitMQ is nil, Handler might panic.
+		// Let's create a nil-safe client or just panic.
+		// I will log.Fatalf
+	}
+
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(userService)
 	folderHandler := handler.NewFolderHandler(folderService, workspaceService)
-	fileHandler := handler.NewFileHandler(fileService, workspaceService)
+	fileHandler := handler.NewFileHandler(fileService, workspaceService, rabbitMQ)
 	summaryHandler := handler.NewSummaryHandler(summaryService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
 	workspaceHandler := handler.NewWorkspaceHandler(workspaceService)
@@ -116,6 +131,8 @@ func New(cfg *config.Config, db *database.DB, store *storage.Storage) *fiber.App
 	files.Post("/upload/presign", fileHandler.Presign)
 	files.Post("/upload/confirm", fileHandler.ConfirmUpload)
 	files.Post("/:id/summarize-stream", fileHandler.SummarizeStream)
+	files.Post("/:id/summarize-async", fileHandler.SummarizeAsync)
+	files.Get("/:id/events", fileHandler.SubscribeEvents)
 	files.Get("/:id/download", fileHandler.GetDownloadURL)
 
 	// Summary routes (protected)

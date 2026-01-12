@@ -17,6 +17,7 @@ type Config struct {
 	RateLimit   RateLimitConfig
 	Upload      UploadConfig
 	CORSOrigins string
+	RabbitMQURL string
 }
 
 type ServerConfig struct {
@@ -124,6 +125,7 @@ func Load() (*Config, error) {
 			MaxFileSizeMB: int64(getEnvInt("MAX_FILE_SIZE_MB", 25)),
 		},
 		CORSOrigins: getEnv("CORS_ORIGINS", "http://localhost:3000"),
+		RabbitMQURL: getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 	}
 
 	return cfg, nil

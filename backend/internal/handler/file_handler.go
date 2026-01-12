@@ -20,6 +20,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/nextpdf/backend/internal/infrastructure"
 	"github.com/nextpdf/backend/internal/middleware"
 	"github.com/nextpdf/backend/internal/models"
 	"github.com/nextpdf/backend/internal/repository"
@@ -31,9 +32,10 @@ type FileHandler struct {
 	workspaceService *service.WorkspaceService
 	httpClient       *http.Client
 	aiServiceURL     string
+	rabbitMQ         *infrastructure.RabbitMQClient
 }
 
-func NewFileHandler(fileService *service.FileService, workspaceService *service.WorkspaceService) *FileHandler {
+func NewFileHandler(fileService *service.FileService, workspaceService *service.WorkspaceService, rabbitMQ *infrastructure.RabbitMQClient) *FileHandler {
 	aiURL := os.Getenv("AI_SERVICE_URL")
 	if aiURL == "" {
 		aiURL = "http://localhost:8000"
@@ -42,8 +44,9 @@ func NewFileHandler(fileService *service.FileService, workspaceService *service.
 	return &FileHandler{
 		fileService:      fileService,
 		workspaceService: workspaceService,
-		httpClient:       &http.Client{Timeout: 0},
+		httpClient:       &http.Client{Timeout: 30 * time.Minute},
 		aiServiceURL:     aiURL,
+		rabbitMQ:         rabbitMQ,
 	}
 }
 
@@ -192,6 +195,73 @@ func (h *FileHandler) SummarizeStream(c *fiber.Ctx) error {
 					}
 				}
 			}
+		}
+	})
+
+	return nil
+}
+
+func (h *FileHandler) SummarizeAsync(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	fileID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("INVALID_ID", "Invalid file ID"))
+	}
+
+	if h.rabbitMQ == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(models.NewErrorResponse("SERVICE_UNAVAILABLE", "Queue service is not available"))
+	}
+
+	// Verify file access
+	file, err := h.fileService.GetByID(c.Context(), fileID, userID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(models.NewErrorResponse("NOT_FOUND", "File not found"))
+	}
+
+	// Prepare task
+	task := map[string]interface{}{
+		"file_id":             file.ID.String(),
+		"storage_path":        file.StoragePath,
+		"style":               c.FormValue("style", "bullet_points"),
+		"language":            c.FormValue("language", "en"),
+		"custom_instructions": c.FormValue("custom_instructions"),
+	}
+
+	// Publish to RabbitMQ
+	if err := h.rabbitMQ.PublishTask(c.Context(), task); err != nil {
+		log.Printf("Failed to publish task for file %s: %v", fileID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse("QUEUE_ERROR", "Failed to queue task"))
+	}
+
+	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
+		"status":  "queued",
+		"message": "Summary generation started in background",
+		"file_id": file.ID,
+	})
+}
+
+func (h *FileHandler) SubscribeEvents(c *fiber.Ctx) error {
+	fileID := c.Params("id")
+
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("Transfer-Encoding", "chunked")
+
+	msgs, err := h.rabbitMQ.SubscribeEvents("summary." + fileID)
+	if err != nil {
+		log.Printf("Failed to subscribe events: %v", err)
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
+
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		for msg := range msgs {
+			fmt.Fprintf(w, "data: %s\n\n", msg.Body)
+			w.Flush()
+
+			// Should we peek at body to see if it is "completed" and stop?
+			// Client will close connection usually.
+			// But good to stop loop if channel closes.
 		}
 	})
 

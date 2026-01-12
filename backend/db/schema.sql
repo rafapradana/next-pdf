@@ -218,7 +218,7 @@ CREATE INDEX idx_summaries_version ON summaries(file_id, version DESC);
 CREATE INDEX idx_summaries_style ON summaries(style);
 
 -- Partial unique index: only one current summary per file
-CREATE UNIQUE INDEX idx_summaries_unique_current 
+CREATE UNIQUE INDEX unique_current_summary 
     ON summaries(file_id) WHERE is_current = TRUE;
 
 -- ============================================================================

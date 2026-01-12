@@ -16,23 +16,28 @@ const (
 
 func AuthMiddleware(authService *service.AuthService) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		var token string
+
+		// 1. Try Header
 		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(models.NewErrorResponse(
-				"UNAUTHORIZED",
-				"Missing authorization header",
-			))
+		if authHeader != "" {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+				token = parts[1]
+			}
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(models.NewErrorResponse(
-				"UNAUTHORIZED",
-				"Invalid authorization header format",
-			))
+		// 2. Try Query Param (for SSE/WS)
+		if token == "" {
+			token = c.Query("token")
 		}
 
-		token := parts[1]
+		if token == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(models.NewErrorResponse(
+				"UNAUTHORIZED",
+				"Missing or invalid authorization",
+			))
+		}
 		claims, err := authService.ValidateAccessToken(token)
 		if err != nil {
 			if err == service.ErrTokenExpired {

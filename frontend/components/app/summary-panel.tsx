@@ -132,107 +132,105 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     setStreamingError(null);
     setIsRegenerateOpen(false); // Close modal if open
 
+    // Switch to summary tab immediately
+    setActiveTab("summary");
+
     // Start time for duration calculation
     const startTime = Date.now();
 
-    try {
-      const formData = new FormData();
-      formData.append("style", selectedStyle);
-      formData.append("language", selectedLanguage);
-      if (customInstructions) formData.append("custom_instructions", customInstructions);
+    let eventSource: EventSource | null = null;
 
+    try {
+      // 1. Submit Job Async (RabbitMQ)
+      const res = await api.summarizeAsync(file.id, selectedStyle, customInstructions, selectedLanguage);
+
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+
+      // 2. Connect to Event Stream (RabbitMQ Bridge)
       const baseUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080").replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
       const token = api.getAccessToken();
-      const headers: HeadersInit = {};
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
 
-      const response = await fetch(
-        `${baseUrl}/api/v1/files/${file.id}/summarize-stream`,
-        {
-          method: "POST",
-          headers,
-          body: formData,
-        }
-      );
+      // Use query param for token (Middleware updated to support this)
+      eventSource = new EventSource(`${baseUrl}/api/v1/files/${file.id}/events?token=${token}`);
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error?.message || "Connection failed");
-      }
+      eventSource.onopen = () => {
+        setStreamLogs(prev => [...prev, "Connected to event stream..."]);
+      };
 
-      if (!response.body) throw new Error("No response body");
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const jsonStr = line.replace("data: ", "");
-              const data = JSON.parse(jsonStr);
-
-              if (data.log) {
-                setStreamLogs(prev => [...prev, data.log]);
-              } else if (data.result) {
-                // Calculate duration locally for immediate feedback
-                const durationMs = Date.now() - startTime;
-
-                // Construct temporary summary object for immediate UI update
-                const tempSummary: any = {
-                  id: "temp-id", // Temporary ID
-                  file_id: file.id,
-                  version: (currentSummary?.version || 0) + 1,
-                  title: data.result.title,
-                  style: selectedStyle,
-                  content: data.result.content,
-                  model_used: "Gemini 2.5 Flash",
-                  processing_duration_ms: durationMs,
-                  language: selectedLanguage,
-                  is_current: true,
-                  created_at: new Date().toISOString(),
-                  processing_started_at: new Date(startTime).toISOString(),
-                  processing_completed_at: new Date().toISOString(),
-                  prompt_tokens: data.result.prompt_tokens,
-                  completion_tokens: data.result.completion_tokens,
-                };
-
-                setCurrentSummary(tempSummary);
-                setIsStreaming(false);
-                toast.success("Summary generated successfully");
-
-                // Switch to summary tab immediately
-                setActiveTab("summary");
-
-                // Refresh history in background
-                // Delay slightly to ensure backend async save might have completed
-                setTimeout(() => {
-                  loadSummaryHistory(file.id);
-                  loadSummary(file.id); // Also refresh main summary to get real ID and stored duration
-                }, 2000);
-              } else if (data.error) {
-                throw new Error(data.error);
-              }
-            } catch (e: any) {
-              // Ignore incomplete chunks
-            }
+          if (data.log) {
+            setStreamLogs(prev => [...prev, data.log]);
           }
+
+          if (data.status === 'completed' && data.result) {
+            // Success
+            const durationMs = Date.now() - startTime;
+
+            // Construct temp summary
+            const tempSummary: any = {
+              id: "temp-id",
+              file_id: file.id,
+              version: (currentSummary?.version || 0) + 1,
+              title: data.result.title,
+              style: selectedStyle,
+              content: data.result.content,
+              model_used: "Gemini 2.5 Flash",
+              processing_duration_ms: durationMs,
+              language: selectedLanguage,
+              is_current: true,
+              created_at: new Date().toISOString(),
+              processing_started_at: new Date(startTime).toISOString(),
+              processing_completed_at: new Date().toISOString(),
+              prompt_tokens: data.result.prompt_tokens || 0,
+              completion_tokens: data.result.completion_tokens || 0,
+            };
+
+            setCurrentSummary(tempSummary);
+            setIsStreaming(false);
+            toast.success("Summary generated successfully");
+
+            eventSource?.close();
+
+            // Refresh history
+            setTimeout(() => {
+              loadSummaryHistory(file.id);
+              loadSummary(file.id);
+            }, 1000);
+
+          } else if (data.status === 'failed' || data.error) {
+            throw new Error(data.error || "Processing failed");
+          }
+
+        } catch (e: any) {
+          setStreamingError(e.message);
+          setIsStreaming(false);
+          eventSource?.close();
+          toast.error("Processing Error", { description: e.message });
         }
-      }
+      };
+
+      eventSource.onerror = (e) => {
+        console.error("SSE Error:", e);
+        // Don't close immediately on minor network jitters unless fatal?
+        // Browser usually retries. But if server closes, it errors.
+        if (eventSource?.readyState === EventSource.CLOSED) {
+          // Closed
+          setStreamingError("Connection closed unexpectedly.");
+          setIsStreaming(false);
+        }
+      };
 
     } catch (err: any) {
-      console.error("Stream error:", err);
-      setStreamingError(err.message || "Failed to generate summary");
+      console.error("Generation error:", err);
+      setStreamingError(err.message || "Failed to start generation");
       setIsStreaming(false);
-      toast.error("Failed to generate summary", {
+      eventSource?.close();
+      toast.error("Failed to generate", {
         description: err.message,
       });
     }

@@ -44,6 +44,7 @@ type FileResponse struct {
 	PageCount        *int             `json:"page_count,omitempty"`
 	Status           ProcessingStatus `json:"status"`
 	HasSummary       bool             `json:"has_summary"`
+	MimeType         string           `json:"mime_type"`
 	UploadedAt       time.Time        `json:"uploaded_at"`
 	ProcessedAt      *time.Time       `json:"processed_at,omitempty"`
 }

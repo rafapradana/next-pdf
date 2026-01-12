@@ -48,6 +48,10 @@ class ApiClient {
       ...options.headers,
     };
 
+    if (options.body instanceof FormData) {
+      delete (headers as Record<string, string>)['Content-Type'];
+    }
+
     const token = this.getAccessToken();
     if (token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
@@ -404,6 +408,22 @@ class ApiClient {
       body: JSON.stringify({ style, custom_instructions: customInstructions, language }),
     });
   }
+
+  async summarizeAsync(fileId: string, style: string, customInstructions?: string, language: string = 'en') {
+    const formData = new FormData();
+    formData.append('style', style);
+    if (customInstructions) formData.append('custom_instructions', customInstructions);
+    formData.append('language', language);
+
+    return this.request<{
+      status: string;
+      message: string;
+      file_id: string;
+    }>(`/files/${fileId}/summarize-async`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
   // Workspaces
   async createWorkspace(name: string) {
     return this.request<Workspace>('/workspaces', {
@@ -454,6 +474,7 @@ export interface FileItem {
   original_filename: string;
   folder_id: string | null;
   file_size: number;
+  mime_type: string;
   page_count?: number;
   status: 'uploaded' | 'pending' | 'processing' | 'completed' | 'failed';
   has_summary?: boolean;
