@@ -118,6 +118,15 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
   const handleGenerateStream = async () => {
     if (!file.id) return;
 
+    // Strict Frontend Validation
+    const isPdf = file.mime_type === 'application/pdf' || file.filename.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      toast.error("Invalid File Type", {
+        description: "Summarization is only available for PDF files.",
+      });
+      return;
+    }
+
     setIsStreaming(true);
     setStreamLogs([]);
     setStreamingError(null);

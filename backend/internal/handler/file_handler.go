@@ -73,6 +73,34 @@ func (h *FileHandler) SummarizeStream(c *fiber.Ctx) error {
 	}
 	defer content.Close()
 
+	// Strict Backend Validation
+	// 1. Check Metadata
+	if file.MimeType != "application/pdf" {
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("INVALID_FILE_TYPE", "Only PDF files can be summarized"))
+	}
+
+	// 2. Smart Check (Magic Numbers)
+	header := make([]byte, 5)
+	n, err := io.ReadFull(content, header)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.NewErrorResponse("INTERNAL_ERROR", "Failed to validate file"))
+	}
+
+	// Check for %PDF- signature
+	if !bytes.HasPrefix(header[:n], []byte("%PDF-")) {
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("INVALID_FILE_TYPE", "File is not a valid PDF (missing signature)"))
+	}
+
+	// Reconstruct the reader to include the read bytes
+	// We use a custom struct to combine MultiReader with the original Closer
+	content = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: io.MultiReader(bytes.NewReader(header[:n]), content),
+		Closer: content,
+	}
+
 	// 2. Prepare request to AI Service
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
