@@ -121,7 +121,10 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
     setIsStreaming(true);
     setStreamLogs([]);
     setStreamingError(null);
-    setIsRegenerateOpen(false);
+    setIsRegenerateOpen(false); // Close modal if open
+
+    // Start time for duration calculation
+    const startTime = Date.now();
 
     try {
       const formData = new FormData();
@@ -171,6 +174,9 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
               if (data.log) {
                 setStreamLogs(prev => [...prev, data.log]);
               } else if (data.result) {
+                // Calculate duration locally for immediate feedback
+                const durationMs = Date.now() - startTime;
+
                 // Construct temporary summary object for immediate UI update
                 const tempSummary: any = {
                   id: "temp-id", // Temporary ID
@@ -179,12 +185,12 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                   title: data.result.title,
                   style: selectedStyle,
                   content: data.result.content,
-                  model_used: "Gemini 2.5 Flash", // Or get from config/response
-                  processing_duration_ms: 0,
+                  model_used: "Gemini 2.5 Flash",
+                  processing_duration_ms: durationMs,
                   language: selectedLanguage,
                   is_current: true,
                   created_at: new Date().toISOString(),
-                  processing_started_at: new Date().toISOString(),
+                  processing_started_at: new Date(startTime).toISOString(),
                   processing_completed_at: new Date().toISOString(),
                   prompt_tokens: data.result.prompt_tokens,
                   completion_tokens: data.result.completion_tokens,
@@ -194,8 +200,15 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
                 setIsStreaming(false);
                 toast.success("Summary generated successfully");
 
-                // Only refresh history in background to avoid race conditions with main summary
-                loadSummaryHistory(file.id);
+                // Switch to summary tab immediately
+                setActiveTab("summary");
+
+                // Refresh history in background
+                // Delay slightly to ensure backend async save might have completed
+                setTimeout(() => {
+                  loadSummaryHistory(file.id);
+                  loadSummary(file.id); // Also refresh main summary to get real ID and stored duration
+                }, 2000);
               } else if (data.error) {
                 throw new Error(data.error);
               }
@@ -392,18 +405,28 @@ export function SummaryPanel({ file }: SummaryPanelProps) {
 
                   {/* Inline Metadata Chips */}
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-500">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded" title="AI Model">
                       ✨ {currentSummary.model_used?.replace('gemini-', '') || "2.5-flash"}
                     </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded" title="Language">
                       {getLanguageFlag(currentSummary.language)} {getLanguageName(currentSummary.language)}
                     </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded" title="Summary Style">
                       {STYLE_ICONS[currentSummary.style] || "📄"} {summaryStyles.find(s => s.id === currentSummary.style)?.name || currentSummary.style}
                     </span>
                     {currentSummary.prompt_tokens > 0 && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded" title="Token Usage">
                         🔢 {currentSummary.prompt_tokens + (currentSummary.completion_tokens || 0)}
+                      </span>
+                    )}
+                    {file.page_count && file.page_count > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded" title="Page Count">
+                        📄 {file.page_count} Pages
+                      </span>
+                    )}
+                    {currentSummary.processing_duration_ms > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-100 rounded" title="Processing Time">
+                        ⏱️ {(currentSummary.processing_duration_ms / 1000).toFixed(1)}s
                       </span>
                     )}
                   </div>

@@ -20,20 +20,21 @@ type FileRepository struct {
 }
 
 type ExportRow struct {
-	ID               uuid.UUID
-	Filename         string
-	OriginalFilename string
-	Size             int64
-	PageCount        *int // Pointer to handle nulls
-	MimeType         string
-	UploadedAt       time.Time
-	Status           string
-	FolderPath       string
-	WorkspaceName    string
-	SummaryVersion   *int // Pointer to handle nulls
-	SummaryModel     *string
-	SummaryContent   *string
-	SummaryCreatedAt *time.Time
+	ID                        uuid.UUID
+	Filename                  string
+	OriginalFilename          string
+	Size                      int64
+	PageCount                 *int // Pointer to handle nulls
+	MimeType                  string
+	UploadedAt                time.Time
+	Status                    string
+	FolderPath                string
+	WorkspaceName             string
+	SummaryVersion            *int // Pointer to handle nulls
+	SummaryModel              *string
+	SummaryContent            *string
+	SummaryCreatedAt          *time.Time
+	SummaryProcessingDuration *int
 }
 
 func NewFileRepository(db *pgxpool.Pool) *FileRepository {
@@ -268,7 +269,7 @@ func (r *FileRepository) Export(ctx context.Context, params FileListParams, file
 		SELECT 
 			f.id, f.filename, f.original_filename, f.file_size, f.page_count, f.mime_type, f.uploaded_at, f.status,
 			COALESCE(fo.name, '/'), COALESCE(w.name, 'Personal'),
-			s.version, s.model_used, s.content, s.created_at
+			s.version, s.model_used, s.content, s.created_at, s.processing_duration_ms
 		FROM files f
 		LEFT JOIN folders fo ON f.folder_id = fo.id
 		LEFT JOIN workspaces w ON f.workspace_id = w.id
@@ -332,11 +333,12 @@ func (r *FileRepository) Export(ctx context.Context, params FileListParams, file
 		var sVersion *int
 		var sModel, sContent *string
 		var sCreatedAt *time.Time
+		var sProcessingDuration *int
 
 		err := rows.Scan(
 			&r.ID, &r.Filename, &r.OriginalFilename, &r.Size, &r.PageCount, &r.MimeType, &r.UploadedAt, &r.Status,
 			&r.FolderPath, &r.WorkspaceName,
-			&sVersion, &sModel, &sContent, &sCreatedAt,
+			&sVersion, &sModel, &sContent, &sCreatedAt, &sProcessingDuration,
 		)
 		if err != nil {
 			return nil, err
@@ -346,6 +348,7 @@ func (r *FileRepository) Export(ctx context.Context, params FileListParams, file
 		r.SummaryModel = sModel
 		r.SummaryContent = sContent
 		r.SummaryCreatedAt = sCreatedAt
+		r.SummaryProcessingDuration = sProcessingDuration
 
 		results = append(results, r)
 	}

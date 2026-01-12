@@ -439,11 +439,10 @@ func (s *FileService) ExportToCSV(ctx context.Context, userID uuid.UUID, workspa
 		w := csv.NewWriter(pw)
 		defer w.Flush()
 
-		// Headers
 		headers := []string{
 			"File ID", "Filename", "Original Filename", "Size (Bytes)", "Page Count",
 			"Type", "Uploaded At", "Status", "Workspace", "Folder",
-			"Summary Version", "Summary Model", "Summary Created At", "Summary Content",
+			"Summary Version", "Summary Model", "Summary Created At", "Summary Processing Duration (ms)", "Summary Content",
 		}
 		if err := w.Write(headers); err != nil {
 			return // or handle error better, but pipe will close
@@ -473,14 +472,19 @@ func (s *FileService) ExportToCSV(ctx context.Context, userID uuid.UUID, workspa
 				if r.SummaryCreatedAt != nil {
 					createdAt = r.SummaryCreatedAt.Format(time.RFC3339)
 				}
+				duration := ""
+				if r.SummaryProcessingDuration != nil {
+					duration = strconv.Itoa(*r.SummaryProcessingDuration)
+				}
 				record = append(record,
 					strconv.Itoa(*r.SummaryVersion),
 					*r.SummaryModel,
 					createdAt,
+					duration,
 					*r.SummaryContent,
 				)
 			} else {
-				record = append(record, "", "", "", "")
+				record = append(record, "", "", "", "", "")
 			}
 
 			if err := w.Write(record); err != nil {
@@ -494,10 +498,11 @@ func (s *FileService) ExportToCSV(ctx context.Context, userID uuid.UUID, workspa
 
 // JSON Export types
 type ExportFileSummary struct {
-	Version   int       `json:"version"`
-	Model     string    `json:"model"`
-	CreatedAt time.Time `json:"created_at"`
-	Content   string    `json:"content"`
+	Version              int       `json:"version"`
+	Model                string    `json:"model"`
+	CreatedAt            time.Time `json:"created_at"`
+	Content              string    `json:"content"`
+	ProcessingDurationMs int       `json:"processing_duration_ms"`
 }
 
 type ExportFile struct {
@@ -553,11 +558,16 @@ func (s *FileService) ExportToJSON(ctx context.Context, userID uuid.UUID, worksp
 				if r.SummaryContent != nil {
 					content = *r.SummaryContent
 				}
+				duration := 0
+				if r.SummaryProcessingDuration != nil {
+					duration = *r.SummaryProcessingDuration
+				}
 				existing.Summaries = append(existing.Summaries, ExportFileSummary{
-					Version:   *r.SummaryVersion,
-					Model:     model,
-					CreatedAt: createdAt,
-					Content:   content,
+					Version:              *r.SummaryVersion,
+					Model:                model,
+					CreatedAt:            createdAt,
+					Content:              content,
+					ProcessingDurationMs: duration,
 				})
 			}
 		} else {
@@ -588,11 +598,16 @@ func (s *FileService) ExportToJSON(ctx context.Context, userID uuid.UUID, worksp
 				if r.SummaryContent != nil {
 					content = *r.SummaryContent
 				}
+				duration := 0
+				if r.SummaryProcessingDuration != nil {
+					duration = *r.SummaryProcessingDuration
+				}
 				file.Summaries = append(file.Summaries, ExportFileSummary{
-					Version:   *r.SummaryVersion,
-					Model:     model,
-					CreatedAt: createdAt,
-					Content:   content,
+					Version:              *r.SummaryVersion,
+					Model:                model,
+					CreatedAt:            createdAt,
+					Content:              content,
+					ProcessingDurationMs: duration,
 				})
 			}
 

@@ -50,16 +50,14 @@ func NewFileHandler(fileService *service.FileService, workspaceService *service.
 func (h *FileHandler) SummarizeStream(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 
-	fileIDStr := c.Params("id")
-	fileID, err := uuid.Parse(fileIDStr)
+	fileID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse(
-			"VALIDATION_ERROR",
-			"Invalid file ID",
-		))
+		return c.Status(fiber.StatusBadRequest).JSON(models.NewErrorResponse("INVALID_ID", "Invalid file ID"))
 	}
 
-	// 1. Get file content and metadata
+	startTime := time.Now()
+
+	// 1. Get file content from storage
 	content, file, err := h.fileService.GetFileContent(c.Context(), userID, fileID)
 	if err != nil {
 		if errors.Is(err, repository.ErrFileNotFound) {
@@ -152,10 +150,15 @@ func (h *FileHandler) SummarizeStream(c *fiber.Ctx) error {
 						go func(res models.SummaryCallbackRequest) {
 							saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 							defer cancel()
+
+							// Calculate duration
+							durationMs := int(time.Since(startTime).Milliseconds())
+							res.ProcessingDurationMs = durationMs
+
 							if err := h.fileService.SaveStreamSummary(saveCtx, userID, fileID, res); err != nil {
 								log.Printf("ERROR: Failed to save summary for file %s: %v", fileID, err)
 							} else {
-								log.Printf("SUCCESS: Saved summary for file %s", fileID)
+								log.Printf("SUCCESS: Saved summary for file %s (Duration: %dms)", fileID, durationMs)
 							}
 						}(*event.Result)
 					}
